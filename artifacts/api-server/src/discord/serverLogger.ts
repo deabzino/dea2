@@ -48,6 +48,9 @@ type MessageSnapshot = {
   imageUrl: string | null;
 };
 const snapshots = new Map<string, MessageSnapshot>();
+type InviteSnapshot = Map<string, { uses: number; inviter: string }>;
+const inviteSnapshots = new Map<string, InviteSnapshot>();
+const inviteFetchQueues = new Map<string, Promise<void>>();
 
 const defaultSettings = (): LogSettings => ({
   channelId: null,
@@ -227,6 +230,108 @@ export function logCommandError(guild: Guild, userId: string, command: string, e
   enqueue(guild, "commands", embed(guild, "Command error", COLORS.delete, [["Who", `<@${userId}> (${userId})`], ["Command", command], ["Error", error instanceof Error ? error.message : String(error)] ]));
 }
 
+function readProperty(value: unknown, key: string): unknown {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+    return undefined;
+  }
+  return Reflect.get(value, key);
+}
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined) return "none";
+  if (Array.isArray(value)) return value.map(displayValue).join(", ") || "none";
+  if (typeof value === "object") {
+    return JSON.stringify(value, (_, item: unknown) =>
+      typeof item === "bigint" ? item.toString() : item,
+    ) ?? String(value);
+  }
+  return String(value);
+}
+
+function genericTarget(item: unknown): string {
+  const name = readProperty(item, "name") ?? readProperty(item, "code");
+  const id = readProperty(item, "id");
+  if (name && id) return `${String(name)} (${String(id)})`;
+  if (name) return String(name);
+  return id ? String(id) : "Event target unavailable";
+}
+
+function changedProperties(
+  previous: unknown,
+  current: unknown,
+  properties: readonly string[],
+): string[] {
+  return properties.flatMap((property) => {
+    const readValue = (item: unknown) => {
+      if (property !== "permissionOverwrites") return readProperty(item, property);
+      const cache = readProperty(readProperty(item, property), "cache");
+      if (!cache || typeof cache !== "object" || !("values" in cache)) return cache;
+      const values = Reflect.get(cache, "values");
+      if (typeof values !== "function") return cache;
+      return [...(values.call(cache) as Iterable<unknown>)].map((overwrite) => ({
+        id: readProperty(overwrite, "id"),
+        allow: String(readProperty(readProperty(overwrite, "allow"), "bitfield")),
+        deny: String(readProperty(readProperty(overwrite, "deny"), "bitfield")),
+      }));
+    };
+    const before = readValue(previous);
+    const after = readValue(current);
+    if (displayValue(before) === displayValue(after)) return [];
+    return [`${property}: ${displayValue(before)} → ${displayValue(after)}`];
+  });
+}
+
+async function withInviteFetch<T>(guild: Guild, operation: () => Promise<T>): Promise<T> {
+  const previous = inviteFetchQueues.get(guild.id) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current);
+  inviteFetchQueues.set(guild.id, queued);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (inviteFetchQueues.get(guild.id) === queued) {
+      inviteFetchQueues.delete(guild.id);
+    }
+  }
+}
+
+async function loadInviteSnapshot(guild: Guild): Promise<InviteSnapshot> {
+  const invites = await guild.invites.fetch();
+  return new Map(
+    [...invites.values()].map((invite) => [
+      invite.code,
+      {
+        uses: invite.uses ?? 0,
+        inviter: invite.inviter?.tag ?? "creator unavailable",
+      },
+    ]),
+  );
+}
+
+async function identifyJoinInvite(guild: Guild): Promise<string> {
+  return withInviteFetch(guild, async () => {
+    const previous = inviteSnapshots.get(guild.id);
+    const current = await loadInviteSnapshot(guild);
+    inviteSnapshots.set(guild.id, current);
+    if (!previous) return "Not identified (invite tracking is initializing)";
+
+    const increased = [...current.entries()].filter(
+      ([code, invite]) => invite.uses > (previous.get(code)?.uses ?? 0),
+    );
+    if (increased.length === 1) {
+      const [code, invite] = increased[0]!;
+      return `${code} (created by ${invite.inviter}; ${invite.uses} uses)`;
+    }
+    if (increased.length > 1) return "Not identified (multiple invites were used)";
+    return "Not identified (no invite usage increase detected)";
+  });
+}
+
 function messageContent(message: Message): string {
   return message.content || "No text content";
 }
@@ -237,6 +342,15 @@ function attachmentDetails(message: Message): string {
 
 export function registerServerLogger(client: Client): void {
   globalClient = client;
+  client.once(Events.ClientReady, (readyClient) => {
+    for (const guild of readyClient.guilds.cache.values()) {
+      void withInviteFetch(guild, async () => {
+        inviteSnapshots.set(guild.id, await loadInviteSnapshot(guild));
+      }).catch((error) => {
+        console.warn(`Could not initialize invite tracking for guild ${guild.id}`, error);
+      });
+    }
+  });
   const safe = (event: string, handler: (...args: any[]) => Promise<void> | void) => {
     client.on(event as never, (...args: any[]) => {
       void Promise.resolve(handler(...args)).catch((error) => console.error(`Server log handler failed for ${event}`, error));
@@ -289,7 +403,19 @@ export function registerServerLogger(client: Client): void {
     if (message.guild) rememberMessage(message);
   });
 
-  safe(Events.GuildMemberAdd, async (member: GuildMember) => enqueue(member.guild, "members", embed(member.guild, "Member joined", COLORS.create, [["Who", `${member.user.tag} (${member.id})`], ["Account age", `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`], ["Invite", "Discord did not expose the used invite"]])));
+  safe(Events.GuildMemberAdd, async (member: GuildMember) => {
+    let invite = "Unavailable (bot needs Manage Server to inspect invites)";
+    try {
+      invite = await identifyJoinInvite(member.guild);
+    } catch (error) {
+      console.warn("Could not identify the invite used by a joining member", error);
+    }
+    enqueue(member.guild, "members", embed(member.guild, "Member joined", COLORS.create, [
+      ["Who", `${member.user.tag} (${member.id})`],
+      ["Account age", `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`],
+      ["Invite", invite],
+    ]));
+  });
   safe(Events.GuildMemberRemove, async (member: GuildMember) => enqueue(member.guild, "members", embed(member.guild, "Member left", COLORS.delete, [["Who", `${member.user.tag} (${member.id})`], ["Actor", await auditActor(member.guild, AuditLogEvent.MemberKick, member.id)]])));
   safe(Events.GuildBanAdd, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member banned", COLORS.delete, [["Who", `${ban.user.tag} (${ban.user.id})`], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id)], ["Reason", ban.reason ?? "No reason provided"]])));
   safe(Events.GuildBanRemove, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member unbanned", COLORS.create, [["Who", `${ban.user.tag} (${ban.user.id})`], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id)], ["Reason", ban.reason ?? "No reason provided"]])));
@@ -317,23 +443,133 @@ export function registerServerLogger(client: Client): void {
     if (changes.length) enqueue(member.guild, "voice", embed(member.guild, "Voice state updated", COLORS.info, [["Who", `${member.user.tag} (${member.id})`], ...changes]));
   });
 
-  const generic: Array<[string, LogCategory, string, number]> = [
-    [Events.ChannelCreate, "channels", "Channel created", COLORS.create], [Events.ChannelDelete, "channels", "Channel deleted", COLORS.delete], [Events.ChannelUpdate, "channels", "Channel updated", COLORS.update],
-    [Events.ThreadCreate, "channels", "Thread created", COLORS.create], [Events.ThreadDelete, "channels", "Thread deleted", COLORS.delete], [Events.ThreadUpdate, "channels", "Thread updated", COLORS.update],
-    [Events.ThreadMembersUpdate, "channels", "Thread members updated", COLORS.update], [Events.GuildRoleCreate, "roles", "Role created", COLORS.create], [Events.GuildRoleDelete, "roles", "Role deleted", COLORS.delete], [Events.GuildRoleUpdate, "roles", "Role updated", COLORS.update],
-    [Events.GuildUpdate, "server", "Server updated", COLORS.update], [Events.GuildEmojiCreate, "server", "Emoji created", COLORS.create], [Events.GuildEmojiDelete, "server", "Emoji deleted", COLORS.delete], [Events.GuildEmojiUpdate, "server", "Emoji updated", COLORS.update],
-    [Events.GuildCreate, "server", "Bot added to server", COLORS.create], [Events.GuildDelete, "server", "Bot removed from server", COLORS.delete],
-    [Events.GuildStickerCreate, "server", "Sticker created", COLORS.create], [Events.GuildStickerDelete, "server", "Sticker deleted", COLORS.delete], [Events.GuildStickerUpdate, "server", "Sticker updated", COLORS.update],
-    [Events.InviteCreate, "server", "Invite created", COLORS.create], [Events.InviteDelete, "server", "Invite deleted", COLORS.delete], [Events.WebhooksUpdate, "server", "Webhooks updated", COLORS.update],
-    [Events.GuildIntegrationsUpdate, "server", "Integrations updated", COLORS.update],
-    [Events.StageInstanceCreate, "voice", "Stage instance created", COLORS.create], [Events.StageInstanceUpdate, "voice", "Stage instance updated", COLORS.update], [Events.StageInstanceDelete, "voice", "Stage instance deleted", COLORS.delete],
-    [Events.GuildScheduledEventCreate, "server", "Scheduled event created", COLORS.create], [Events.GuildScheduledEventDelete, "server", "Scheduled event deleted", COLORS.delete], [Events.GuildScheduledEventUpdate, "server", "Scheduled event updated", COLORS.update],
-    [Events.GuildScheduledEventUserAdd, "server", "Scheduled event user joined", COLORS.create], [Events.GuildScheduledEventUserRemove, "server", "Scheduled event user left", COLORS.delete],
-    [Events.AutoModerationRuleCreate, "automod", "Automod rule created", COLORS.create], [Events.AutoModerationRuleUpdate, "automod", "Automod rule updated", COLORS.update], [Events.AutoModerationRuleDelete, "automod", "Automod rule deleted", COLORS.delete], [Events.AutoModerationActionExecution, "automod", "Automod action executed", COLORS.delete],
-  ];
-  for (const [event, category, title, color] of generic) safe(event, async (item: any) => {
-    const guild = item?.guild ?? (item?.guildId ? globalClient?.guilds.cache.get(item.guildId) : undefined);
+  safe(Events.InviteCreate, async (invite: any) => {
+    const guild = invite.guild as Guild | null;
     if (!guild) return;
-    enqueue(guild, category, embed(guild, title, color, [["Actor", await auditActor(guild, AuditLogEvent.ChannelUpdate, item?.id)], ["Target", item?.name ?? item?.id ?? "Event target unavailable"], ["Details", JSON.stringify(item?.changes ?? item?.options ?? "No additional event data")]]));
+    inviteSnapshots.get(guild.id)?.set(invite.code, {
+      uses: invite.uses ?? 0,
+      inviter: invite.inviter?.tag ?? "creator unavailable",
+    });
+    enqueue(guild, "server", embed(guild, "Invite created", COLORS.create, [
+      ["Actor", invite.inviter ? `${invite.inviter.tag} (${invite.inviter.id})` : "Invite creator unavailable"],
+      ["Code", invite.code],
+      ["Channel", idText(invite.channelId)],
+      ["Uses", `${invite.uses ?? 0}${invite.maxUses ? ` / ${invite.maxUses}` : " / unlimited"}`],
+      ["Expires", invite.maxAge ? `${invite.maxAge} seconds` : "Never"],
+    ]));
   });
+  safe(Events.ThreadMembersUpdate, async (_members: any, added: any, removed: any, thread: any) => {
+    const guild = thread?.guild as Guild | undefined;
+    if (!guild) return;
+    const formatMembers = (collection: any) =>
+      [...(collection?.values?.() ?? [])]
+        .map((member: any) => `<@${member.id}>`)
+        .join(", ") || "none";
+    enqueue(guild, "channels", embed(guild, "Thread members updated", COLORS.update, [
+      ["Thread", genericTarget(thread)],
+      ["Added", formatMembers(added)],
+      ["Removed", formatMembers(removed)],
+    ]));
+  });
+  const logScheduledEventUser = (title: string, color: number) =>
+    async (event: any, user: any) => {
+      const guild = event?.guild as Guild | undefined;
+      if (!guild) return;
+      enqueue(guild, "server", embed(guild, title, color, [
+        ["Event", genericTarget(event)],
+        ["User", user ? `${user.tag ?? user.username} (${user.id})` : "Unavailable"],
+      ]));
+    };
+  safe(Events.GuildScheduledEventUserAdd, logScheduledEventUser("Scheduled event user joined", COLORS.create));
+  safe(Events.GuildScheduledEventUserRemove, logScheduledEventUser("Scheduled event user left", COLORS.delete));
+
+  type GenericLog = {
+    event: string;
+    category: LogCategory;
+    title: string;
+    color: number;
+    auditType?: AuditLogEvent;
+    update?: boolean;
+  };
+  const generic: GenericLog[] = [
+    { event: Events.ChannelCreate, category: "channels", title: "Channel created", color: COLORS.create, auditType: AuditLogEvent.ChannelCreate },
+    { event: Events.ChannelDelete, category: "channels", title: "Channel deleted", color: COLORS.delete, auditType: AuditLogEvent.ChannelDelete },
+    { event: Events.ChannelUpdate, category: "channels", title: "Channel updated", color: COLORS.update, auditType: AuditLogEvent.ChannelUpdate, update: true },
+    { event: Events.ThreadCreate, category: "channels", title: "Thread created", color: COLORS.create, auditType: AuditLogEvent.ThreadCreate },
+    { event: Events.ThreadDelete, category: "channels", title: "Thread deleted", color: COLORS.delete, auditType: AuditLogEvent.ThreadDelete },
+    { event: Events.ThreadUpdate, category: "channels", title: "Thread updated", color: COLORS.update, auditType: AuditLogEvent.ThreadUpdate, update: true },
+    { event: Events.GuildRoleCreate, category: "roles", title: "Role created", color: COLORS.create, auditType: AuditLogEvent.RoleCreate },
+    { event: Events.GuildRoleDelete, category: "roles", title: "Role deleted", color: COLORS.delete, auditType: AuditLogEvent.RoleDelete },
+    { event: Events.GuildRoleUpdate, category: "roles", title: "Role updated", color: COLORS.update, auditType: AuditLogEvent.RoleUpdate, update: true },
+    { event: Events.GuildUpdate, category: "server", title: "Server updated", color: COLORS.update, auditType: AuditLogEvent.GuildUpdate, update: true },
+    { event: Events.GuildEmojiCreate, category: "server", title: "Emoji created", color: COLORS.create, auditType: AuditLogEvent.EmojiCreate },
+    { event: Events.GuildEmojiDelete, category: "server", title: "Emoji deleted", color: COLORS.delete, auditType: AuditLogEvent.EmojiDelete },
+    { event: Events.GuildEmojiUpdate, category: "server", title: "Emoji updated", color: COLORS.update, auditType: AuditLogEvent.EmojiUpdate, update: true },
+    { event: Events.GuildCreate, category: "server", title: "Bot added to server", color: COLORS.create, auditType: AuditLogEvent.BotAdd },
+    { event: Events.GuildDelete, category: "server", title: "Bot removed from server", color: COLORS.delete },
+    { event: Events.GuildStickerCreate, category: "server", title: "Sticker created", color: COLORS.create, auditType: AuditLogEvent.StickerCreate },
+    { event: Events.GuildStickerDelete, category: "server", title: "Sticker deleted", color: COLORS.delete, auditType: AuditLogEvent.StickerDelete },
+    { event: Events.GuildStickerUpdate, category: "server", title: "Sticker updated", color: COLORS.update, auditType: AuditLogEvent.StickerUpdate, update: true },
+    { event: Events.InviteDelete, category: "server", title: "Invite deleted", color: COLORS.delete, auditType: AuditLogEvent.InviteDelete },
+    { event: Events.WebhooksUpdate, category: "server", title: "Webhooks updated", color: COLORS.update },
+    { event: Events.GuildIntegrationsUpdate, category: "server", title: "Integrations updated", color: COLORS.update },
+    { event: Events.StageInstanceCreate, category: "voice", title: "Stage instance created", color: COLORS.create, auditType: AuditLogEvent.StageInstanceCreate },
+    { event: Events.StageInstanceUpdate, category: "voice", title: "Stage instance updated", color: COLORS.update, auditType: AuditLogEvent.StageInstanceUpdate, update: true },
+    { event: Events.StageInstanceDelete, category: "voice", title: "Stage instance deleted", color: COLORS.delete, auditType: AuditLogEvent.StageInstanceDelete },
+    { event: Events.GuildScheduledEventCreate, category: "server", title: "Scheduled event created", color: COLORS.create, auditType: AuditLogEvent.GuildScheduledEventCreate },
+    { event: Events.GuildScheduledEventDelete, category: "server", title: "Scheduled event deleted", color: COLORS.delete, auditType: AuditLogEvent.GuildScheduledEventDelete },
+    { event: Events.GuildScheduledEventUpdate, category: "server", title: "Scheduled event updated", color: COLORS.update, auditType: AuditLogEvent.GuildScheduledEventUpdate, update: true },
+    { event: Events.AutoModerationRuleCreate, category: "automod", title: "Automod rule created", color: COLORS.create, auditType: AuditLogEvent.AutoModerationRuleCreate },
+    { event: Events.AutoModerationRuleUpdate, category: "automod", title: "Automod rule updated", color: COLORS.update, auditType: AuditLogEvent.AutoModerationRuleUpdate, update: true },
+    { event: Events.AutoModerationRuleDelete, category: "automod", title: "Automod rule deleted", color: COLORS.delete, auditType: AuditLogEvent.AutoModerationRuleDelete },
+    { event: Events.AutoModerationActionExecution, category: "automod", title: "Automod action executed", color: COLORS.delete },
+  ];
+  const trackedProperties: Record<LogCategory, string[]> = {
+    messages: [],
+    members: [],
+    voice: [],
+    channels: ["name", "topic", "type", "parentId", "bitrate", "userLimit", "rateLimitPerUser", "nsfw", "position", "archived", "locked", "invitable", "permissionOverwrites"],
+    roles: ["name", "color", "hoist", "mentionable", "position", "permissions"],
+    server: ["name", "description", "verificationLevel", "explicitContentFilter", "defaultMessageNotifications", "preferredLocale"],
+    commands: [],
+    automod: ["name", "enabled", "eventType", "triggerType"],
+  };
+
+  for (const config of generic) {
+    safe(config.event, async (...args: any[]) => {
+      const previous = args[0];
+      const item = config.update ? args[1] : args[0];
+      const guild = readProperty(item, "guild") as Guild | undefined
+        ?? (readProperty(item, "guildId")
+          ? globalClient?.guilds.cache.get(String(readProperty(item, "guildId")))
+          : undefined)
+        ?? (readProperty(item, "commands") ? item as Guild : undefined);
+      if (!guild) return;
+
+      const id = config.auditType === AuditLogEvent.BotAdd
+        ? globalClient?.user?.id
+        : config.auditType === AuditLogEvent.InviteDelete
+          ? readProperty(item, "code") ?? readProperty(item, "id")
+          : readProperty(item, "id");
+      const actor = config.auditType
+        ? await auditActor(guild, config.auditType, id ? String(id) : undefined)
+        : "Discord did not provide an actor for this event";
+      const details = config.update
+        ? changedProperties(previous, item, trackedProperties[config.category])
+        : [];
+      const values: Array<[string, string]> = [
+        ["Actor", actor],
+        ["Target", genericTarget(item)],
+      ];
+      if (details.length > 0) {
+        values.push(["Changes", details.join("\n")]);
+      } else if (config.update) {
+        values.push(["Changes", "No tracked properties changed"]);
+      } else {
+        const type = readProperty(item, "type");
+        if (type !== undefined) values.push(["Type", displayValue(type)]);
+      }
+      enqueue(guild, config.category, embed(guild, config.title, config.color, values));
+    });
+  }
 }
