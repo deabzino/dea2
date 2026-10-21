@@ -87,6 +87,7 @@ const storedCodes = new Map<string, string>();
 const deadMembersByGuild = new Map<string, Set<string>>();
 const pendingDeadPlayerUnmutes = new Set<string>();
 const startedAt = Date.now();
+let discordClient: Client | null = null;
 const slashCommands = COMMAND_NAMES.map((name) => {
   const command = new SlashCommandBuilder()
     .setName(name)
@@ -1283,6 +1284,7 @@ export function startDiscordBot(): Client | null {
       Partials.GuildScheduledEvent,
     ],
   });
+  discordClient = client;
   registerServerLogger(client);
 
   let statusInterval: NodeJS.Timeout | null = null;
@@ -1413,4 +1415,25 @@ export function startDiscordBot(): Client | null {
   process.once("SIGTERM", shutdown);
 
   return client;
+}
+
+export function getDiscordBotHealth(): {
+  status: "online" | "connecting" | "disabled";
+  username: string | null;
+  guildCount: number;
+  pingMs: number | null;
+} {
+  if (!discordClient) {
+    return { status: "disabled", username: null, guildCount: 0, pingMs: null };
+  }
+
+  const user = discordClient.user;
+  const ready = discordClient.isReady() && user !== null;
+  const ping = discordClient.ws.ping;
+  return {
+    status: ready ? "online" : "connecting",
+    username: ready ? user.tag : null,
+    guildCount: ready ? discordClient.guilds.cache.size : 0,
+    pingMs: ready && Number.isFinite(ping) && ping >= 0 ? Math.round(ping) : null,
+  };
 }

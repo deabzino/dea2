@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
+import { healthPage } from "./routes/health";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -31,6 +32,10 @@ app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (_req, res) => {
   res.json({ status: "ok", service: "Among Us Discord Bot" });
+});
+
+app.get("/health", (_req, res) => {
+  res.type("html").send(healthPage);
 });
 
 app.use("/api", router);
