@@ -136,7 +136,19 @@ router.get("/health", (_req, res) => {
   });
 });
 
-router.get("/healthz", (_req, res) => {
+router.get("/healthz", (req, res) => {
+  const acceptsHtml = req
+    .get("accept")
+    ?.split(",")
+    .some((mediaType) => {
+      const [type, ...parameters] = mediaType.trim().toLowerCase().split(";");
+      return type === "text/html" && !parameters.some((parameter) => parameter.trim() === "q=0");
+    });
+  if (acceptsHtml) {
+    res.setHeader("Cache-Control", "no-store");
+    res.type("html").send(healthPage);
+    return;
+  }
   res.json({ status: "ok" });
 });
 

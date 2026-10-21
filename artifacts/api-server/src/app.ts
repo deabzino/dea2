@@ -31,7 +31,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (_req, res) => {
-  res.json({ status: "ok", service: "Among Us Discord Bot" });
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(healthPage);
 });
 
 app.get("/health", (_req, res) => {
