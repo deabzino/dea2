@@ -24,12 +24,11 @@ app.listen(port, (err) => {
     process.exit(1);
   }
 
-  logger.info({ port }, "Server listening");
-  startDiscordBot();
-
   void (async () => {
     await initDatabase();
     await syncFromDatabase();
+    logger.info({ port }, "Server listening");
+    startDiscordBot();
   })().catch((error: unknown) => {
     logger.error({ err: error }, "Database startup tasks failed");
   });

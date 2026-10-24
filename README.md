@@ -18,6 +18,12 @@ Set these environment variables in Render:
 - `NODE_ENV=production`
 - `LOG_LEVEL=info` (optional)
 
+The Render blueprint mounts a persistent disk at `/var/data` and stores the
+SQLite database and N-word count file there. Keep that disk attached when
+deploying so per-server settings, logging preferences, and `.nlb` counts
+survive restarts and deploys. Do not replace `DATABASE_URL` or
+`NWORD_DATA_FILE` with paths outside the mounted disk.
+
 Render supplies `PORT` automatically. Do not set it yourself.
 
 The bot must run on an always-on Render instance. Free web services can
