@@ -234,7 +234,7 @@ function updateBotPresence(client: Client): void {
 
     client.user?.setPresence({
       status: currentStatus,
-      activities: [{ name: formatUptime(), type: ActivityType.Watching }],
+      activities: [{ name: formatUptime(), type: ActivityType.Custom }],
     });
   } catch (error) {
     logger.warn({ err: error }, "Failed to update bot presence");
