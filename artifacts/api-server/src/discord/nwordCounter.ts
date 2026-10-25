@@ -48,28 +48,18 @@ export interface NWordStoreData {
 }
 
 function getStorageFilePath(): string {
-  if (process.env["NWORD_DATA_FILE"]) {
-    return path.resolve(process.env["NWORD_DATA_FILE"]);
-  }
-
-  const cwd = process.cwd();
-  let baseDir: string;
-  if (fs.existsSync(path.resolve(cwd, "artifacts/api-server"))) {
-    baseDir = path.resolve(cwd, "artifacts/api-server/data");
-  } else if (path.basename(cwd) === "api-server") {
-    baseDir = path.resolve(cwd, "data");
-  } else {
-    baseDir = path.resolve(cwd, "data");
-  }
-
-  fs.mkdirSync(baseDir, { recursive: true });
-  return path.resolve(baseDir, "nword_counts.json");
+  return process.env["NWORD_DATA_FILE"]
+    ? path.resolve(process.env["NWORD_DATA_FILE"])
+    : "";
 }
 
 let fileStore: NWordStoreData = { guilds: {}, processedMessageIds: [] };
 
 function loadStoreFromFile(): NWordStoreData {
   const filePath = getStorageFilePath();
+  if (!filePath) {
+    return { guilds: {}, processedMessageIds: [] };
+  }
   try {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, "utf-8");
@@ -87,25 +77,7 @@ function loadStoreFromFile(): NWordStoreData {
   return { guilds: {}, processedMessageIds: [] };
 }
 
-function saveStoreToFile(): void {
-  const filePath = getStorageFilePath();
-  const tempPath = `${filePath}.tmp`;
-  try {
-    if (fileStore.processedMessageIds.length > 2000) {
-      fileStore.processedMessageIds = fileStore.processedMessageIds.slice(-2000);
-    }
-    const content = JSON.stringify(fileStore, null, 2);
-    fs.writeFileSync(tempPath, content, "utf-8");
-    fs.renameSync(tempPath, filePath);
-  } catch (error) {
-    logger.error({ err: error, filePath }, "Failed to write N-word counts file");
-  }
-}
-
 fileStore = loadStoreFromFile();
-if (!fs.existsSync(getStorageFilePath())) {
-  saveStoreToFile();
-}
 
 export async function syncFromDatabase(): Promise<void> {
   try {
@@ -122,11 +94,76 @@ export async function syncFromDatabase(): Promise<void> {
       }
     }
     if (changed) {
-      saveStoreToFile();
-      logger.info("Synchronized existing database counts into JSON counts file");
+      logger.info("Loaded existing Supabase counts into the legacy migration cache");
     }
   } catch {
     // Database may be uninitialized or unavailable; ignore
+  }
+}
+
+export async function syncToDatabase(): Promise<void> {
+  if (!process.env["NWORD_DATA_FILE"]) {
+    return;
+  }
+
+  try {
+    const migration = await prisma.$queryRaw<Array<{ migrationKey: string }>>`
+      SELECT "migrationKey" FROM "AppMigration" WHERE "migrationKey" = 'legacy-nword-json-v1' LIMIT 1
+    `;
+    if (migration.length > 0) {
+      return;
+    }
+
+    const existingRecords = await prisma.nWordCount.findMany({
+      select: { guildId: true, userId: true, count: true },
+    });
+    const existingCounts = new Map(
+      existingRecords.map((record) => [`${record.guildId}:${record.userId}`, record.count]),
+    );
+    const countWrites = Object.entries(fileStore.guilds).flatMap(([guildId, guild]) =>
+      Object.entries(guild.counts).map(([userId, count]) => {
+        const persistedCount = Math.max(count, existingCounts.get(`${guildId}:${userId}`) ?? 0);
+        return prisma.nWordCount.upsert({
+          where: { guildId_userId: { guildId, userId } },
+          create: { guildId, userId, count: persistedCount },
+          update: { count: persistedCount },
+        });
+      }),
+    );
+    for (let index = 0; index < countWrites.length; index += 50) {
+      await Promise.all(countWrites.slice(index, index + 50));
+    }
+
+    for (const [guildId, guild] of Object.entries(fileStore.guilds)) {
+      if (guild.enabled !== undefined) {
+        await prisma.guildConfig.upsert({
+          where: { guildId },
+          create: { guildId, nwordEnabled: guild.enabled },
+          update: { nwordEnabled: guild.enabled },
+        });
+      }
+    }
+    if (fileStore.processedMessageIds.length > 0) {
+      await prisma.processedMessage.createMany({
+        data: fileStore.processedMessageIds.map((messageId) => ({
+          messageId,
+          guildId: "legacy",
+        })),
+        skipDuplicates: true,
+      });
+    }
+    await prisma.$executeRaw`
+      INSERT INTO "AppMigration" ("migrationKey")
+      VALUES ('legacy-nword-json-v1')
+      ON CONFLICT("migrationKey") DO NOTHING
+    `;
+    logger.info(
+      { countRecords: countWrites.length },
+      "Synchronized JSON N-word data into the database",
+    );
+  } catch (error) {
+    logger.error({ err: error }, "Failed to synchronize JSON N-word data into the database");
+    throw error;
   }
 }
 
@@ -137,6 +174,9 @@ function markMessageProcessed(messageId: string): void {
   processedMessageIds.add(messageId);
   if (!fileStore.processedMessageIds.includes(messageId)) {
     fileStore.processedMessageIds.push(messageId);
+  }
+  if (fileStore.processedMessageIds.length > 2000) {
+    fileStore.processedMessageIds = fileStore.processedMessageIds.slice(-2000);
   }
   if (processedMessageIds.size > MAX_PROCESSED_CACHE) {
     const firstKey = processedMessageIds.keys().next().value;
@@ -196,9 +236,6 @@ export function formatCounterResponse(userId: string, count: number): string {
 const guildConfigCache = new Map<string, boolean>();
 
 export async function isNWordCounterEnabled(guildId: string): Promise<boolean> {
-  if (fileStore.guilds[guildId]?.enabled !== undefined) {
-    return fileStore.guilds[guildId].enabled!;
-  }
   const cached = guildConfigCache.get(guildId);
   if (cached !== undefined) {
     return cached;
@@ -214,7 +251,9 @@ export async function isNWordCounterEnabled(guildId: string): Promise<boolean> {
       fileStore.guilds[guildId] = { counts: {} };
     }
     fileStore.guilds[guildId].enabled = enabled;
-    saveStoreToFile();
+    if (!config) {
+      await prisma.guildConfig.create({ data: { guildId, nwordEnabled: true } });
+    }
     return enabled;
   } catch (error) {
     logger.warn({ err: error, guildId }, "Failed to fetch guild config, defaulting to enabled");
@@ -226,12 +265,13 @@ export async function setNWordCounterEnabled(
   guildId: string,
   enabled: boolean,
 ): Promise<boolean> {
+  const previousValue = guildConfigCache.get(guildId);
+  const previousFileValue = fileStore.guilds[guildId]?.enabled;
   if (!fileStore.guilds[guildId]) {
     fileStore.guilds[guildId] = { counts: {} };
   }
   fileStore.guilds[guildId].enabled = enabled;
   guildConfigCache.set(guildId, enabled);
-  saveStoreToFile();
 
   try {
     await prisma.guildConfig.upsert({
@@ -246,6 +286,13 @@ export async function setNWordCounterEnabled(
     });
   } catch (error) {
     logger.warn({ err: error, guildId }, "Failed to update guild config in database");
+    if (previousValue === undefined) guildConfigCache.delete(guildId);
+    else guildConfigCache.set(guildId, previousValue);
+    if (fileStore.guilds[guildId]) {
+      if (previousFileValue === undefined) delete fileStore.guilds[guildId].enabled;
+      else fileStore.guilds[guildId].enabled = previousFileValue;
+    }
+    return false;
   }
   return true;
 }
@@ -254,11 +301,6 @@ export async function getUserNWordCount(
   guildId: string,
   userId: string,
 ): Promise<number> {
-  const fileCount = fileStore.guilds[guildId]?.counts[userId];
-  if (fileCount !== undefined) {
-    return fileCount;
-  }
-
   try {
     const record = await prisma.nWordCount.findUnique({
       where: {
@@ -269,17 +311,29 @@ export async function getUserNWordCount(
       },
     });
     const count = record?.count ?? 0;
-    if (count > 0) {
+    if (record) {
       if (!fileStore.guilds[guildId]) {
         fileStore.guilds[guildId] = { counts: {} };
       }
       fileStore.guilds[guildId].counts[userId] = count;
-      saveStoreToFile();
     }
     return count;
   } catch (error) {
     logger.warn({ err: error, guildId, userId }, "Failed to fetch user N-word count");
-    return 0;
+    return fileStore.guilds[guildId]?.counts[userId] ?? 0;
+  }
+}
+
+export async function resetUserNWordCount(guildId: string, userId: string): Promise<boolean> {
+  try {
+    await prisma.nWordCount.deleteMany({ where: { guildId, userId } });
+    if (fileStore.guilds[guildId]) {
+      delete fileStore.guilds[guildId].counts[userId];
+    }
+    return true;
+  } catch (error) {
+    logger.error({ err: error, guildId, userId }, "Failed to reset user N-word count");
+    return false;
   }
 }
 
@@ -287,17 +341,6 @@ export async function getNWordLeaderboard(
   guildId: string,
   limit = 10,
 ): Promise<{ userId: string; count: number }[]> {
-  const guildCounts = fileStore.guilds[guildId]?.counts ?? {};
-  const fileRows = Object.entries(guildCounts)
-    .filter(([_, count]) => count > 0)
-    .map(([userId, count]) => ({ userId, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
-
-  if (fileRows.length > 0) {
-    return fileRows;
-  }
-
   try {
     const records = await prisma.nWordCount.findMany({
       where: {
@@ -319,13 +362,15 @@ export async function getNWordLeaderboard(
       }
       fileStore.guilds[guildId].counts[row.userId] = row.count;
     }
-    if (records.length > 0) {
-      saveStoreToFile();
-    }
     return records;
   } catch (error) {
     logger.warn({ err: error, guildId }, "Failed to fetch N-word leaderboard");
-    return [];
+    const guildCounts = fileStore.guilds[guildId]?.counts ?? {};
+    return Object.entries(guildCounts)
+      .filter(([, count]) => count > 0)
+      .map(([userId, count]) => ({ userId, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
   }
 }
 
@@ -376,6 +421,20 @@ export async function handleNWordMessage(message: Message): Promise<boolean> {
     return false;
   }
 
+  try {
+    const alreadyProcessed = await prisma.processedMessage.findUnique({
+      where: { messageId: message.id },
+      select: { messageId: true },
+    });
+    if (alreadyProcessed) {
+      markMessageProcessed(message.id);
+      return false;
+    }
+  } catch (error) {
+    logger.error({ err: error, guildId: message.guild.id, messageId: message.id }, "Could not check persisted message state");
+    return false;
+  }
+
   const occurrences = countNWordOccurrences(message.content);
   if (occurrences <= 0) {
     return false;
@@ -394,7 +453,6 @@ export async function handleNWordMessage(message: Message): Promise<boolean> {
   const currentCount = fileStore.guilds[message.guild.id].counts[message.author.id] ?? 0;
   const newCount = currentCount + occurrences;
   fileStore.guilds[message.guild.id].counts[message.author.id] = newCount;
-  saveStoreToFile();
 
   try {
     await prisma.$transaction([
@@ -426,11 +484,26 @@ export async function handleNWordMessage(message: Message): Promise<boolean> {
   } catch (error) {
     logger.warn(
       { err: error, guildId: message.guild.id, messageId: message.id },
-      "Database transaction failed; persisted to JSON file store instead",
+      "Supabase transaction failed; skipped N-word count update",
     );
+    if (currentCount === 0) {
+      delete fileStore.guilds[message.guild.id].counts[message.author.id];
+    } else {
+      fileStore.guilds[message.guild.id].counts[message.author.id] = currentCount;
+    }
+    processedMessageIds.delete(message.id);
+    fileStore.processedMessageIds = fileStore.processedMessageIds.filter((id) => id !== message.id);
+    return false;
   }
 
-  const replyText = formatCounterResponse(message.author.id, newCount);
+  const persisted = await prisma.nWordCount.findUnique({
+    where: { guildId_userId: { guildId: message.guild.id, userId: message.author.id } },
+    select: { count: true },
+  }).catch(() => null);
+  const actualCount = persisted?.count ?? newCount;
+  fileStore.guilds[message.guild.id].counts[message.author.id] = actualCount;
+
+  const replyText = formatCounterResponse(message.author.id, actualCount);
   await message.reply({
     content: replyText,
     allowedMentions: { repliedUser: true },

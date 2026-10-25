@@ -74,6 +74,8 @@ export function getHelpEmbed(
               "> *Checks slur count for yourself or another user.*",
               "> `/nwordleaderboard` • `.nlb` • `.nleaderboard`",
               "> *Displays the top 10 users in this server.*",
+              "> `/nwordclear <@user>` or `.nwordclear @user` (Manage Server)",
+              "> *Clears that user's count and removes them from the leaderboard.*",
             ].join("\n"),
           },
           {

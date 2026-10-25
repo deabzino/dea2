@@ -31,12 +31,14 @@ import {
   type VoiceConnection,
 } from "@discordjs/voice";
 import { logger } from "../lib/logger";
+import { prisma } from "../lib/prisma";
 import {
   handleNWordMessage,
   isNWordCounterEnabled,
   setNWordCounterEnabled,
   getUserNWordCount,
   getNWordLeaderboard,
+  resetUserNWordCount,
   createLeaderboardEmbed,
 } from "./nwordCounter";
 import {
@@ -59,6 +61,7 @@ const COMMAND_NAMES = [
   "uptime",
   "nwordcount",
   "nwordleaderboard",
+  "nwordclear",
   "nwordcounter",
   "logs",
 ] as const;
@@ -74,6 +77,7 @@ type VoiceCommand = Exclude<
   | "uptime"
   | "nwordcount"
   | "nwordleaderboard"
+  | "nwordclear"
   | "nwordcounter"
 >;
 const COMMANDS = new Set<CommandName>(COMMAND_NAMES);
@@ -88,6 +92,43 @@ const deadMembersByGuild = new Map<string, Set<string>>();
 const pendingDeadPlayerUnmutes = new Set<string>();
 const startedAt = Date.now();
 let discordClient: Client | null = null;
+
+async function saveGuildState(guildId: string): Promise<boolean> {
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "BotGuildState" ("guildId", "lobbyCode", "deadMemberIds")
+      VALUES (${guildId}, ${storedCodes.get(guildId) ?? null}, ${JSON.stringify([...(deadMembersByGuild.get(guildId) ?? [])])})
+      ON CONFLICT("guildId") DO UPDATE SET
+        "lobbyCode" = excluded."lobbyCode",
+        "deadMemberIds" = excluded."deadMemberIds",
+        "updatedAt" = CURRENT_TIMESTAMP
+    `;
+    return true;
+  } catch (error) {
+    logger.error({ err: error, guildId }, "Failed to persist bot guild state");
+    return false;
+  }
+}
+
+export async function loadPersistedGuildState(): Promise<void> {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ guildId: string; lobbyCode: string | null; deadMemberIds: string }>>`
+      SELECT "guildId", "lobbyCode", "deadMemberIds" FROM "BotGuildState"
+    `;
+    for (const row of rows) {
+      if (row.lobbyCode) storedCodes.set(row.guildId, row.lobbyCode);
+      try {
+        const ids = JSON.parse(row.deadMemberIds) as unknown;
+        if (Array.isArray(ids)) deadMembersByGuild.set(row.guildId, new Set(ids.filter((id): id is string => typeof id === "string")));
+      } catch (error) {
+        logger.warn({ err: error, guildId: row.guildId }, "Could not parse persisted dead-player list");
+      }
+    }
+    logger.info({ guilds: rows.length }, "Loaded persisted bot guild state");
+  } catch (error) {
+    logger.error({ err: error }, "Failed to load persisted bot guild state");
+  }
+}
 const slashCommands = COMMAND_NAMES.map((name) => {
   const command = new SlashCommandBuilder()
     .setName(name)
@@ -118,6 +159,8 @@ const slashCommands = COMMAND_NAMES.map((name) => {
                             ? "Check how many times a user has used the N-word"
                             : name === "nwordleaderboard"
                               ? "View the server N-word leaderboard"
+                              : name === "nwordclear"
+                                ? "Remove a user's N-word count from this server"
                               : "Configure the N-word counter for this server",
     );
 
@@ -155,6 +198,17 @@ const slashCommands = COMMAND_NAMES.map((name) => {
         .setDescription("Optional user to check (defaults to yourself)")
         .setRequired(false),
     );
+  }
+
+  if (name === "nwordclear") {
+    command
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setDescription("The user whose count should be cleared")
+          .setRequired(true),
+      );
   }
 
   if (name === "nwordcounter") {
@@ -281,13 +335,19 @@ function normalizeCode(input: string): string | null {
   return /^[A-Z]{6}$/.test(code) ? code : null;
 }
 
-function saveCode(guildId: string, input: string): string {
+async function saveCode(guildId: string, input: string): Promise<string> {
   const code = normalizeCode(input);
   if (!code) {
     return "Please provide a valid six-letter Among Us code, such as `ABCDEF`.";
   }
 
+  const previousCode = storedCodes.get(guildId);
   storedCodes.set(guildId, code);
+  if (!(await saveGuildState(guildId))) {
+    if (previousCode) storedCodes.set(guildId, previousCode);
+    else storedCodes.delete(guildId);
+    return "I couldn't save the lobby code because the database update failed.";
+  }
   return `The code is **${code}**. I’ll remember it for this server.`;
 }
 
@@ -319,6 +379,10 @@ async function markDeadPlayer(
   const deadMemberIds = getDeadMemberIds(guild.id);
   const wasAlreadyDead = deadMemberIds.has(memberId);
   deadMemberIds.add(memberId);
+  if (!(await saveGuildState(guild.id))) {
+    if (!wasAlreadyDead) deadMemberIds.delete(memberId);
+    return "I couldn't update the dead-player list because the database update failed.";
+  }
   const member = await guild.members.fetch(memberId).catch(() => null);
 
   if (!member) {
@@ -415,6 +479,10 @@ async function clearDeadPlayers(
     if (!deadMemberIds.delete(memberId)) {
       return `<@${memberId}> was not on the dead list.`;
     }
+    if (!(await saveGuildState(guild.id))) {
+      deadMemberIds.add(memberId);
+      return "I couldn't update the dead-player list because the database update failed.";
+    }
     const unmuteResult = await unmutePlayers(guild, [memberId]);
     return `<@${memberId}> is no longer marked dead${formatUnmuteSummary(unmuteResult)}.`;
   }
@@ -422,6 +490,10 @@ async function clearDeadPlayers(
   const idsToUnmute = [...deadMemberIds];
   const count = deadMemberIds.size;
   deadMemberIds.clear();
+  if (!(await saveGuildState(guild.id))) {
+    for (const id of idsToUnmute) deadMemberIds.add(id);
+    return "I couldn't clear the dead-player list because the database update failed.";
+  }
   if (count === 0) {
     return "New round started. The dead-player list was already empty.";
   }
@@ -845,7 +917,7 @@ async function handleSlashCommand(
     const suppliedCode = interaction.options.getString("code");
     await interaction.reply({
       content: suppliedCode
-        ? saveCode(interaction.guild.id, suppliedCode)
+        ? await saveCode(interaction.guild.id, suppliedCode)
         : showSavedCode(interaction.guild.id),
     });
     return;
@@ -896,6 +968,24 @@ async function handleSlashCommand(
         ? `You have used the N-word **${count}** time${count === 1 ? "" : "s"} in this server.`
         : `<@${targetUser.id}> has used the N-word **${count}** time${count === 1 ? "" : "s"} in this server.`;
     await interaction.reply({ content: message });
+    return;
+  }
+
+  if (command === "nwordclear") {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    const hasAdminPerm = member?.permissions.has(PermissionFlagsBits.ManageGuild)
+      || member?.permissions.has(PermissionFlagsBits.Administrator);
+    if (!hasAdminPerm) {
+      await interaction.reply({ content: "You need the 'Manage Server' permission to clear N-word counts.", ephemeral: true });
+      return;
+    }
+    const target = interaction.options.getUser("user", true);
+    const cleared = await resetUserNWordCount(interaction.guild.id, target.id);
+    await interaction.reply({
+      content: cleared
+        ? `Cleared <@${target.id}>'s N-word count and removed them from the leaderboard.`
+        : "I couldn't clear that count because the database update failed.",
+    });
     return;
   }
 
@@ -1015,6 +1105,7 @@ const PREFIX_ALIASES: Record<string, CommandName> = {
   nleaderboard: "nwordleaderboard",
   nlb: "nwordleaderboard",
   ncounter: "nwordcounter",
+  nclear: "nwordclear",
 };
 
 function getPrefixCommand(content: string): CommandName | null {
@@ -1065,7 +1156,7 @@ async function handlePrefixCommand(message: Message): Promise<void> {
     if (message.guild) {
       const automaticCode = detectAutomaticCode(message.content);
       if (automaticCode) {
-        await message.reply(saveCode(message.guild.id, automaticCode));
+        await message.reply(await saveCode(message.guild.id, automaticCode));
       } else if (containsCodeReference(message.content)) {
         await message.reply(showSavedCode(message.guild.id));
       }
@@ -1095,6 +1186,27 @@ async function handlePrefixCommand(message: Message): Promise<void> {
         ? `You have used the N-word **${count}** time${count === 1 ? "" : "s"} in this server.`
         : `<@${targetUser.id}> has used the N-word **${count}** time${count === 1 ? "" : "s"} in this server.`;
     await message.reply(response);
+    return;
+  }
+
+  if (command === "nwordclear") {
+    const member = message.member
+      ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
+    const hasAdminPerm = member?.permissions.has(PermissionFlagsBits.ManageGuild)
+      || member?.permissions.has(PermissionFlagsBits.Administrator);
+    if (!hasAdminPerm) {
+      await message.reply("You need the 'Manage Server' permission to clear N-word counts.");
+      return;
+    }
+    const target = message.mentions.users.first();
+    if (!target) {
+      await message.reply("Use `.nwordclear @user` to clear a user's count and remove them from the leaderboard.");
+      return;
+    }
+    const cleared = await resetUserNWordCount(message.guild.id, target.id);
+    await message.reply(cleared
+      ? `Cleared <@${target.id}>'s N-word count and removed them from the leaderboard.`
+      : "I couldn't clear that count because the database update failed.");
     return;
   }
 
@@ -1154,7 +1266,7 @@ async function handlePrefixCommand(message: Message): Promise<void> {
     const suppliedCode = message.content.trim().split(/\s+/).slice(1).join("");
     await message.reply(
       suppliedCode
-        ? saveCode(message.guild.id, suppliedCode)
+        ? await saveCode(message.guild.id, suppliedCode)
         : showSavedCode(message.guild.id),
     );
     return;

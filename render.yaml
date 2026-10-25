@@ -5,16 +5,10 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm --workspace @workspace/api-server run start
     healthCheckPath: /api/healthz
-    disk:
-      name: among-us-discord-bot-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: file:/var/data/bot.db
-      - key: NWORD_DATA_FILE
-        value: /var/data/nword_counts.json
+        sync: false
       - key: DISCORD_BOT_TOKEN
         sync: false

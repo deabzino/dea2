@@ -1,7 +1,7 @@
 import app from "./app";
-import { startDiscordBot } from "./discord/bot";
+import { loadPersistedGuildState, startDiscordBot } from "./discord/bot";
 import { initDatabase } from "./lib/prisma";
-import { syncFromDatabase } from "./discord/nwordCounter";
+import { syncFromDatabase, syncToDatabase } from "./discord/nwordCounter";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"];
@@ -27,9 +27,12 @@ app.listen(port, (err) => {
   void (async () => {
     await initDatabase();
     await syncFromDatabase();
+    await syncToDatabase();
+    await loadPersistedGuildState();
     logger.info({ port }, "Server listening");
     startDiscordBot();
   })().catch((error: unknown) => {
     logger.error({ err: error }, "Database startup tasks failed");
+    process.exit(1);
   });
 });

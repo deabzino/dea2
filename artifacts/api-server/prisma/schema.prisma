@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -32,4 +32,22 @@ model ProcessedMessage {
   createdAt DateTime @default(now())
 
   @@index([guildId])
+}
+
+model BotGuildState {
+  guildId       String   @id
+  lobbyCode     String?
+  deadMemberIds String   @default("[]")
+  updatedAt     DateTime @updatedAt
+}
+
+model ServerLogConfig {
+  guildId         String   @id
+  channelId       String?
+  enabled         String   @default("{\"messages\":true,\"members\":true,\"voice\":true,\"channels\":true,\"roles\":true,\"server\":true,\"commands\":true,\"automod\":true}")
+  ignoredChannels String   @default("[]")
+  ignoredRoles    String   @default("[]")
+  ignoredUsers    String   @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
