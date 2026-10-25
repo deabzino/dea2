@@ -41,5 +41,6 @@ testem.log
 .DS_Store
 Thumbs.db
 artifacts/api-server/prisma/*.db
+artifacts/api-server/src/generated/prisma
 .env
 *.env
