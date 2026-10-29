@@ -163,6 +163,32 @@ async function auditActor(guild: Guild, type: AuditLogEvent, targetId?: string):
   }
 }
 
+async function messageDeleteActor(guild: Guild, authorId: string, channelId: string): Promise<string> {
+  try {
+    const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 10 });
+    const entry = logs.entries.find((item) => {
+      const extra = item.extra as { channel?: { id?: string } } | null;
+      return Date.now() - item.createdTimestamp < 15_000 &&
+        (item.target as { id?: string } | null)?.id === authorId &&
+        (!extra?.channel?.id || extra.channel.id === channelId);
+    });
+    if (entry?.executor) return `${entry.executor.tag} (${entry.executor.id})`;
+
+    // Purges are recorded as one bulk-delete audit entry, while Discord may
+    // still deliver individual MessageDelete gateway events for each message.
+    const bulkLogs = await guild.fetchAuditLogs({ type: AuditLogEvent.MessageBulkDelete, limit: 10 });
+    const bulkEntry = bulkLogs.entries.find((item) => {
+      const extra = item.extra as { channel?: { id?: string } } | null;
+      return Date.now() - item.createdTimestamp < 15_000 && extra?.channel?.id === channelId;
+    });
+    if (bulkEntry?.executor) return `${bulkEntry.executor.tag} (${bulkEntry.executor.id})`;
+  } catch {
+    // The bot may not have View Audit Log permission, or Discord may not have
+    // made the entry available yet.
+  }
+  return "Actor unavailable (no matching audit log entry)";
+}
+
 function embed(guild: Guild, title: string, color: number, details: Array<[string, string]>, target?: string, imageUrl?: string | null): EmbedBuilder {
   const fields = details.map(([name, value]) => ({ name: truncate(name, 256), value: truncate(value || "No additional data", 1024), inline: true }));
   const result = new EmbedBuilder()
@@ -362,10 +388,7 @@ export function registerServerLogger(client: Client): void {
     const snapshot = (full && snapshotMessage(full)) ?? snapshots.get(message.id);
     const guild = full?.guild ?? (snapshot ? globalClient?.guilds.cache.get(snapshot.guildId) : undefined);
     if (guild && snapshot) {
-      const auditedActor = await auditActor(guild, AuditLogEvent.MessageDelete, snapshot.authorId);
-      const actor = auditedActor === "Discord did not provide an actor"
-        ? `${snapshot.authorTag} (${snapshot.authorId}) (self-delete or unavailable)`
-        : auditedActor;
+      const actor = await messageDeleteActor(guild, snapshot.authorId, snapshot.channelId);
       enqueue(guild, "messages", embed(guild, "Message deleted", COLORS.delete, [
         ["Who", actor], ["Author", `${snapshot.authorTag} (${snapshot.authorId})`],
         ["Channel", idText(snapshot.channelId)], ["Content", snapshot.content], ["Attachments", snapshot.attachments],
