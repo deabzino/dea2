@@ -69,6 +69,10 @@ function idText(value: string | null | undefined): string {
   return value ? `<#${value}> (${value})` : "Unavailable";
 }
 
+function userText(id: string, name?: string | null): string {
+  return `<@${id}> (${name ? `${name}, ` : ""}${id})`;
+}
+
 function imageUrlFromMessage(message: Message): string | null {
   return [...message.attachments.values()].find((attachment) =>
     attachment.contentType?.startsWith("image/") ||
@@ -157,7 +161,7 @@ async function auditActor(guild: Guild, type: AuditLogEvent, targetId?: string):
   try {
     const logs = await guild.fetchAuditLogs({ type, limit: 6 });
     const entry = logs.entries.find((item) => Date.now() - item.createdTimestamp < 8_000 && (!targetId || (item.target as { id?: string } | null)?.id === targetId));
-    return entry?.executor ? `${entry.executor.tag} (${entry.executor.id})` : "Discord did not provide an actor";
+    return entry?.executor ? userText(entry.executor.id, entry.executor.tag) : "Discord did not provide an actor";
   } catch {
     return "Discord did not provide an actor";
   }
@@ -172,7 +176,7 @@ async function messageDeleteActor(guild: Guild, authorId: string, channelId: str
         (item.target as { id?: string } | null)?.id === authorId &&
         (!extra?.channel?.id || extra.channel.id === channelId);
     });
-    if (entry?.executor) return `${entry.executor.tag} (${entry.executor.id})`;
+    if (entry?.executor) return userText(entry.executor.id, entry.executor.tag);
 
     // Purges are recorded as one bulk-delete audit entry, while Discord may
     // still deliver individual MessageDelete gateway events for each message.
@@ -181,7 +185,7 @@ async function messageDeleteActor(guild: Guild, authorId: string, channelId: str
       const extra = item.extra as { channel?: { id?: string } } | null;
       return Date.now() - item.createdTimestamp < 15_000 && extra?.channel?.id === channelId;
     });
-    if (bulkEntry?.executor) return `${bulkEntry.executor.tag} (${bulkEntry.executor.id})`;
+    if (bulkEntry?.executor) return userText(bulkEntry.executor.id, bulkEntry.executor.tag);
   } catch {
     // The bot may not have View Audit Log permission, or Discord may not have
     // made the entry available yet.
@@ -333,7 +337,7 @@ async function loadInviteSnapshot(guild: Guild): Promise<InviteSnapshot> {
       invite.code,
       {
         uses: invite.uses ?? 0,
-        inviter: invite.inviter?.tag ?? "creator unavailable",
+        inviter: invite.inviter ? userText(invite.inviter.id, invite.inviter.tag) : "creator unavailable",
       },
     ]),
   );
@@ -390,7 +394,7 @@ export function registerServerLogger(client: Client): void {
     if (guild && snapshot) {
       const actor = await messageDeleteActor(guild, snapshot.authorId, snapshot.channelId);
       enqueue(guild, "messages", embed(guild, "Message deleted", COLORS.delete, [
-        ["Who", actor], ["Author", `${snapshot.authorTag} (${snapshot.authorId})`],
+        ["Who", actor], ["Author", userText(snapshot.authorId, snapshot.authorTag)],
         ["Channel", idText(snapshot.channelId)], ["Content", snapshot.content], ["Attachments", snapshot.attachments],
       ], undefined, snapshot.imageUrl));
       snapshots.delete(message.id);
@@ -401,7 +405,7 @@ export function registerServerLogger(client: Client): void {
     const before = oldMessage.partial ? snapshots.get(oldMessage.id)?.content : messageContent(oldMessage);
     const fetched = newMessage.partial ? await newMessage.fetch().catch(() => newMessage) : newMessage;
     enqueue(newMessage.guild, "messages", embed(newMessage.guild, "Message updated", COLORS.update, [
-      ["Who", fetched.author ? `${fetched.author.tag} (${fetched.author.id})` : "Unavailable"],
+      ["Who", fetched.author ? userText(fetched.author.id, fetched.author.tag) : "Unavailable"],
       ["Channel", idText(fetched.channelId)], ["Before", before ?? "No previous snapshot available"],
       ["After", messageContent(fetched)], ["Attachments", attachmentDetails(fetched)],
     ], undefined, imageUrlFromMessage(fetched)), undefined, fetched);
@@ -413,11 +417,11 @@ export function registerServerLogger(client: Client): void {
   });
   safe(Events.MessageReactionAdd, async (reaction: any, user: any) => {
     const message = reaction.message as Message;
-    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction added", COLORS.create, [["Who", `${user.tag} (${user.id})`], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
+    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction added", COLORS.create, [["Who", userText(user.id, user.tag)], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
   });
   safe(Events.MessageReactionRemove, async (reaction: any, user: any) => {
     const message = reaction.message as Message;
-    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction removed", COLORS.delete, [["Who", `${user.tag} (${user.id})`], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
+    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction removed", COLORS.delete, [["Who", userText(user.id, user.tag)], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
   });
   safe(Events.MessageReactionRemoveAll, async (message: Message) => { if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "All reactions removed", COLORS.delete, [["Who", await auditActor(message.guild, AuditLogEvent.MessagePin)], ["Message", message.id], ["Channel", idText(message.channelId)]])); });
   safe(Events.MessageReactionRemoveEmoji, async (reaction: any) => { const message = reaction.message as Message; if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction emoji removed", COLORS.delete, [["Who", "Discord did not include the actor in this event"], ["Emoji", reaction.emoji.toString()], ["Message", message.id]])); });
@@ -434,14 +438,14 @@ export function registerServerLogger(client: Client): void {
       console.warn("Could not identify the invite used by a joining member", error);
     }
     enqueue(member.guild, "members", embed(member.guild, "Member joined", COLORS.create, [
-      ["Who", `${member.user.tag} (${member.id})`],
+      ["Who", userText(member.id, member.user.tag)],
       ["Account age", `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`],
       ["Invite", invite],
     ]));
   });
-  safe(Events.GuildMemberRemove, async (member: GuildMember) => enqueue(member.guild, "members", embed(member.guild, "Member left", COLORS.delete, [["Who", `${member.user.tag} (${member.id})`], ["Actor", await auditActor(member.guild, AuditLogEvent.MemberKick, member.id)]])));
-  safe(Events.GuildBanAdd, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member banned", COLORS.delete, [["Who", `${ban.user.tag} (${ban.user.id})`], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id)], ["Reason", ban.reason ?? "No reason provided"]])));
-  safe(Events.GuildBanRemove, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member unbanned", COLORS.create, [["Who", `${ban.user.tag} (${ban.user.id})`], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id)], ["Reason", ban.reason ?? "No reason provided"]])));
+  safe(Events.GuildMemberRemove, async (member: GuildMember) => enqueue(member.guild, "members", embed(member.guild, "Member left", COLORS.delete, [["Who", userText(member.id, member.user.tag)], ["Actor", await auditActor(member.guild, AuditLogEvent.MemberKick, member.id)]])));
+  safe(Events.GuildBanAdd, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member banned", COLORS.delete, [["Who", userText(ban.user.id, ban.user.tag)], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id)], ["Reason", ban.reason ?? "No reason provided"]])));
+  safe(Events.GuildBanRemove, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member unbanned", COLORS.create, [["Who", userText(ban.user.id, ban.user.tag)], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id)], ["Reason", ban.reason ?? "No reason provided"]])));
   safe(Events.GuildMemberUpdate, async (oldMember: GuildMember, member: GuildMember) => {
     const changes: Array<[string, string]> = [];
     if (oldMember.nickname !== member.nickname) changes.push(["Nickname", `${oldMember.nickname ?? "none"} → ${member.nickname ?? "none"}`]);
@@ -450,9 +454,9 @@ export function registerServerLogger(client: Client): void {
     if (added.length) changes.push(["Roles added", added.join(", ")]);
     if (removed.length) changes.push(["Roles removed", removed.join(", ")]);
     if (oldMember.communicationDisabledUntilTimestamp !== member.communicationDisabledUntilTimestamp) changes.push(["Timeout", member.communicationDisabledUntilTimestamp ? `until <t:${Math.floor(member.communicationDisabledUntilTimestamp / 1000)}:F>` : "removed"]);
-    if (changes.length) enqueue(member.guild, "members", embed(member.guild, "Member updated", COLORS.update, [["Who", await auditActor(member.guild, AuditLogEvent.MemberUpdate, member.id)], ["Member", `${member.user.tag} (${member.id})`], ...changes]));
+    if (changes.length) enqueue(member.guild, "members", embed(member.guild, "Member updated", COLORS.update, [["Who", await auditActor(member.guild, AuditLogEvent.MemberUpdate, member.id)], ["Member", userText(member.id, member.user.tag)], ...changes]));
   });
-  safe(Events.UserUpdate, async (oldUser: any, user: any) => { for (const guild of globalClient?.guilds.cache.values() ?? []) { if (oldUser.username !== user.username || oldUser.globalName !== user.globalName || oldUser.avatar !== user.avatar) enqueue(guild, "members", embed(guild, "User profile updated", COLORS.update, [["User", `${user.tag} (${user.id})`], ["Username", `${oldUser.username} → ${user.username}`], ["Global name", `${oldUser.globalName ?? "none"} → ${user.globalName ?? "none"}`], ["Avatar", oldUser.avatar !== user.avatar ? "changed" : "unchanged"]])); } });
+  safe(Events.UserUpdate, async (oldUser: any, user: any) => { for (const guild of globalClient?.guilds.cache.values() ?? []) { if (oldUser.username !== user.username || oldUser.globalName !== user.globalName || oldUser.avatar !== user.avatar) enqueue(guild, "members", embed(guild, "User profile updated", COLORS.update, [["User", userText(user.id, user.tag)], ["Username", `${oldUser.username} → ${user.username}`], ["Global name", `${oldUser.globalName ?? "none"} → ${user.globalName ?? "none"}`], ["Avatar", oldUser.avatar !== user.avatar ? "changed" : "unchanged"]])); } });
   safe(Events.VoiceStateUpdate, async (oldState: any, newState: any) => {
     const member = newState.member ?? oldState.member; if (!member) return;
     const changes: Array<[string, string]> = [];
@@ -463,7 +467,7 @@ export function registerServerLogger(client: Client): void {
     if (oldState.selfDeaf !== newState.selfDeaf) changes.push(["Self deafen", String(newState.selfDeaf)]);
     if (oldState.streaming !== newState.streaming) changes.push(["Stream", newState.streaming ? "started" : "stopped"]);
     if (oldState.selfVideo !== newState.selfVideo) changes.push(["Camera", newState.selfVideo ? "on" : "off"]);
-    if (changes.length) enqueue(member.guild, "voice", embed(member.guild, "Voice state updated", COLORS.info, [["Who", `${member.user.tag} (${member.id})`], ...changes]));
+    if (changes.length) enqueue(member.guild, "voice", embed(member.guild, "Voice state updated", COLORS.info, [["Who", userText(member.id, member.user.tag)], ...changes]));
   });
 
   safe(Events.InviteCreate, async (invite: any) => {
@@ -471,10 +475,10 @@ export function registerServerLogger(client: Client): void {
     if (!guild) return;
     inviteSnapshots.get(guild.id)?.set(invite.code, {
       uses: invite.uses ?? 0,
-      inviter: invite.inviter?.tag ?? "creator unavailable",
+      inviter: invite.inviter ? userText(invite.inviter.id, invite.inviter.tag) : "creator unavailable",
     });
     enqueue(guild, "server", embed(guild, "Invite created", COLORS.create, [
-      ["Actor", invite.inviter ? `${invite.inviter.tag} (${invite.inviter.id})` : "Invite creator unavailable"],
+      ["Actor", invite.inviter ? userText(invite.inviter.id, invite.inviter.tag) : "Invite creator unavailable"],
       ["Code", invite.code],
       ["Channel", idText(invite.channelId)],
       ["Uses", `${invite.uses ?? 0}${invite.maxUses ? ` / ${invite.maxUses}` : " / unlimited"}`],
@@ -500,7 +504,7 @@ export function registerServerLogger(client: Client): void {
       if (!guild) return;
       enqueue(guild, "server", embed(guild, title, color, [
         ["Event", genericTarget(event)],
-        ["User", user ? `${user.tag ?? user.username} (${user.id})` : "Unavailable"],
+        ["User", user ? userText(user.id, user.tag ?? user.username) : "Unavailable"],
       ]));
     };
   safe(Events.GuildScheduledEventUserAdd, logScheduledEventUser("Scheduled event user joined", COLORS.create));
