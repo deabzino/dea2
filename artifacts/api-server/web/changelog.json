@@ -1,0 +1,7 @@
+[
+  {"date":"2026-10-29T21:14:18Z","title":"Clearer server activity logs","changes":[{"type":"Improved","text":"Moderator actions are easier to identify in deletion and audit logs."},{"type":"Fixed","text":"Deleted-message entries now attribute actions more reliably."}]},
+  {"date":"2026-10-25T18:08:00Z","title":"Guild data stays with the bot","changes":[{"type":"Improved","text":"Server settings and saved round details now persist in hosted PostgreSQL storage."},{"type":"Improved","text":"The deployment no longer depends on a local persistent disk."}]},
+  {"date":"2026-10-24T02:20:15+01:00","title":"Round details survive restarts","changes":[{"type":"Added","text":"Saved lobby codes and the dead-player list are restored when dea comes back online."},{"type":"Improved","text":"The bot presence now shows its current uptime."}]},
+  {"date":"2026-10-21T02:24:21+01:00","title":"Live service status","changes":[{"type":"Added","text":"A public status dashboard shows the bot connection, server count, gateway ping and process uptime."},{"type":"Improved","text":"The health page refreshes automatically while it is open."}]},
+  {"date":"2026-09-21T22:15:50+01:00","title":"More useful server activity details","changes":[{"type":"Improved","text":"Server logs include clearer event details and command activity."},{"type":"Improved","text":"Deleted-message logs can show image attachments directly in the entry."},{"type":"Fixed","text":"Actor attribution is more reliable for Discord audit events."}]}
+]

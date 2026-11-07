@@ -2,7 +2,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
 import { logger } from "./logger";
 
-const databaseUrl = process.env["DATABASE_URL"];
+const databaseUrl = process.env["DATABASE_URL"] ?? (process.env.WEBSITE_PREVIEW === "true"
+  ? "postgresql://preview:preview@127.0.0.1:5432/preview"
+  : undefined);
 if (!databaseUrl?.startsWith("postgresql://") && !databaseUrl?.startsWith("postgres://")) {
   throw new Error("DATABASE_URL must be a Supabase PostgreSQL connection string.");
 }

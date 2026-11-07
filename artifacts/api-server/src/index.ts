@@ -18,13 +18,23 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
+const server = process.env.WEBSITE_PREVIEW === "true"
+  ? app.listen(port, "127.0.0.1")
+  : app.listen(port);
+server.once("listening", () => onListening());
+server.once("error", (error: Error) => onListening(error));
+
+function onListening(err?: Error): void {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
 
   void (async () => {
+    if (process.env.WEBSITE_PREVIEW === "true") {
+      logger.info({ port }, "Website preview server listening");
+      return;
+    }
     await initDatabase();
     await syncFromDatabase();
     await syncToDatabase();
@@ -35,4 +45,4 @@ app.listen(port, (err) => {
     logger.error({ err: error }, "Database startup tasks failed");
     process.exit(1);
   });
-});
+}

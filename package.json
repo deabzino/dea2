@@ -5,13 +5,17 @@
   "scripts": {
     "dev": "npm --workspace @workspace/api-server run dev",
     "build": "npm --workspace @workspace/api-server run build",
-    "typecheck": "npm --workspace @workspace/api-server run typecheck"
+    "typecheck": "npm --workspace @workspace/api-server run typecheck",
+    "test": "npm run build && node --disable-warning=ExperimentalWarning --experimental-strip-types --test artifacts/api-server/src/discord/serverLogger.test.mjs artifacts/api-server/src/discord/website-api.test.mjs && node scripts/website-check.mjs",
+    "generate:icons": "node scripts/generate-icons.mjs",
+    "check:website": "node scripts/website-check.mjs"
   },
   "private": true,
   "workspaces": [
     "artifacts/api-server"
   ],
   "devDependencies": {
+    "playwright": "^1.65.0",
     "prettier": "^3.9.6",
     "typescript": "~5.9.3"
   }

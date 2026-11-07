@@ -1,5 +1,8 @@
 import { Router, type IRouter } from "express";
 import { getDiscordBotHealth } from "../discord/bot";
+import path from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const router: IRouter = Router();
 
@@ -146,7 +149,9 @@ router.get("/healthz", (req, res) => {
     });
   if (acceptsHtml) {
     res.setHeader("Cache-Control", "no-store");
-    res.type("html").send(healthPage);
+    const webDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "web");
+    const siteUrl = (process.env.SITE_URL ?? "https://dea-5e46.onrender.com").replace(/\/$/, "");
+    res.type("html").send(readFileSync(path.join(webDir, "status.html"), "utf8").replaceAll("__SITE_URL__", siteUrl));
     return;
   }
   res.json({ status: "ok" });

@@ -20,6 +20,7 @@ Set these environment variables in Render:
   with the database password filled in.
 - `NODE_ENV=production`
 - `LOG_LEVEL=info` (optional)
+- `SITE_URL` (optional): the public base URL used for canonical links and social previews. Defaults to `https://dea-5e46.onrender.com`.
 
 Supabase Postgres stores N-word counts and counter settings, logging
 preferences, lobby codes, and dead-player lists. No Render persistent disk is
@@ -52,3 +53,9 @@ PORT=3000 DISCORD_BOT_TOKEN=your-token npm --workspace @workspace/api-server run
 On PowerShell, set the variables first with `$env:PORT = '3000'`,
 `$env:DISCORD_BOT_TOKEN = 'your-token'`, and `$env:DATABASE_URL` to the
 Supabase Session pooler URI.
+
+The build copies the static site in `artifacts/api-server/web` into the
+deployed output. `npm test` runs the production build, offline API and command
+catalog tests, and Playwright checks in a localhost-only preview mode that
+skips the database and Discord login. Run `npm run generate:icons` after
+editing the one-off icon generator in `scripts/generate-icons.mjs`.
