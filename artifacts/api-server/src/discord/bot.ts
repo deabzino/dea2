@@ -16,6 +16,8 @@ import {
 } from "discord.js";
 import {
   configureLogs,
+  flushVoiceLogs,
+  markVoiceChangeByBot,
   getLogSettings,
   ignoreLogTarget,
   logCommand,
@@ -92,6 +94,7 @@ const deadMembersByGuild = new Map<string, Set<string>>();
 const pendingDeadPlayerUnmutes = new Set<string>();
 const startedAt = Date.now();
 let discordClient: Client | null = null;
+let cachedAvatarUrl: string | null = null;
 
 async function saveGuildState(guildId: string): Promise<boolean> {
   try {
@@ -397,6 +400,7 @@ async function markDeadPlayer(
         member.voice.channel,
         true,
       );
+      markVoiceChangeByBot(guild.id, member.id);
       await member.voice.setMute(true, "Among Us dead player");
       return wasAlreadyDead
         ? `<@${memberId}> is already dead and remains server-muted.`
@@ -434,9 +438,10 @@ async function unmutePlayers(
     (member) => member.voice.serverMute,
   );
   const results = await Promise.allSettled(
-    membersNeedingUnmute.map((member) =>
-      member.voice.setMute(false, "Among Us new round"),
-    ),
+    membersNeedingUnmute.map((member) => {
+      markVoiceChangeByBot(guild.id, member.id);
+      return member.voice.setMute(false, "Among Us new round");
+    }),
   );
 
   return {
@@ -600,6 +605,7 @@ async function enforceDeadPlayerMute(
       true,
     );
     if (!member.voice.serverMute) {
+      markVoiceChangeByBot(member.guild.id, member.id);
       await member.voice.setMute(true, "Among Us dead player");
     }
   } catch (error) {
@@ -633,6 +639,7 @@ async function unmuteDeadPlayerAfterChannelMove(
       member.voice.channel,
       true,
     );
+    markVoiceChangeByBot(member.guild.id, member.id);
     await member.voice.setMute(false, "Dead player moved to another channel");
   } catch (error) {
     pendingDeadPlayerUnmutes.delete(member.id);
@@ -796,16 +803,17 @@ async function applyServerMute(
     return member.voice.serverMute !== desiredMuteState;
   });
   const results = await Promise.allSettled(
-    membersNeedingChange.map((member) =>
-      member.voice.setMute(
+    membersNeedingChange.map((member) => {
+      markVoiceChangeByBot(guild.id, member.id);
+      return member.voice.setMute(
         shouldMute || deadMemberIds.has(member.id),
         shouldMute
           ? "Among Us round mute command"
           : deadMemberIds.has(member.id)
             ? "Dead player remains muted"
             : "Among Us round unmute command",
-      ),
-    ),
+      );
+    }),
   );
 
   return {
@@ -1402,6 +1410,7 @@ export function startDiscordBot(): Client | null {
   let statusInterval: NodeJS.Timeout | null = null;
 
   client.once(Events.ClientReady, (readyClient) => {
+    cachedAvatarUrl = readyClient.user.displayAvatarURL({ extension: "png", size: 128 });
     updateBotPresence(readyClient);
     if (statusInterval) {
       clearInterval(statusInterval);
@@ -1512,11 +1521,12 @@ export function startDiscordBot(): Client | null {
     logger.error({ err: error }, "Discord bot login failed");
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
     if (statusInterval) {
       clearInterval(statusInterval);
       statusInterval = null;
     }
+    await flushVoiceLogs();
     for (const connection of activeConnections.values()) {
       connection.destroy();
     }
@@ -1547,5 +1557,20 @@ export function getDiscordBotHealth(): {
     username: ready ? user.tag : null,
     guildCount: ready ? discordClient.guilds.cache.size : 0,
     pingMs: ready && Number.isFinite(ping) && ping >= 0 ? Math.round(ping) : null,
+  };
+}
+
+export function getPublicBotStatus(): { botOnline: boolean; discordPingMs: number | null; botUptimeMs: number; webUptimeMs: number; lastRestart: string; serverCount: number; avatarUrl: string | null; currentTime: string } {
+  const health = getDiscordBotHealth();
+  const ping = health.pingMs;
+  return {
+    botOnline: health.status === "online",
+    discordPingMs: ping !== null && Number.isFinite(ping) && ping > 0 ? ping : null,
+    botUptimeMs: Date.now() - startedAt,
+    webUptimeMs: Math.floor(process.uptime() * 1000),
+    lastRestart: new Date(startedAt).toISOString(),
+    serverCount: health.status === "online" ? health.guildCount : 0,
+    avatarUrl: cachedAvatarUrl,
+    currentTime: new Date().toISOString(),
   };
 }
