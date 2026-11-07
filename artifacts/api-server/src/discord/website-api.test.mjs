@@ -45,10 +45,11 @@ test("registered commands stay synchronized with the single catalog", async () =
 });
 
 test("production preview serves direct pages and safe public data", async () => {
-  const routes = ["/", "/commands", "/changelog", "/status"];
+  const routes = ["/", "/commands", "/changelog", "/status", "/404", "/health"];
   for (const route of routes) {
     const response = await fetch(`${base}${route}`);
     assert.equal(response.status, 200, `${route} should load directly`);
+    assert.equal(response.headers.get("x-robots-tag"), "noindex", `${route} should be excluded from indexing`);
     const body = await response.text();
     assert.match(body, /name="robots" content="noindex"/);
     assert.match(body, /site\.css\?v=1/);
@@ -64,6 +65,8 @@ test("production preview serves direct pages and safe public data", async () => 
   const [statusResponse, commandsResponse] = await Promise.all([fetch(`${base}/api/status`), fetch(`${base}/api/commands`)]);
   assert.equal(statusResponse.status, 200);
   assert.equal(commandsResponse.status, 200);
+  assert.equal(statusResponse.headers.get("x-robots-tag"), "noindex");
+  assert.equal(commandsResponse.headers.get("x-robots-tag"), "noindex");
   const status = await statusResponse.json();
   const commandsText = await commandsResponse.text();
   const commands = JSON.parse(commandsText);
@@ -78,6 +81,12 @@ test("production preview serves direct pages and safe public data", async () => 
   for (const asset of ["/changelog.json", "/shared.js?v=1", "/home.js?v=1", "/commands.js?v=1", "/changelog.js?v=1", "/status.js?v=1", "/site.css?v=1", "/site.webmanifest?v=1", "/robots.txt", "/favicon.svg?v=1"]) {
     const response = await fetch(`${base}${asset}`);
     assert.equal(response.status, 200, `${asset} should be included in the deployed output`);
+    assert.equal(response.headers.get("x-robots-tag"), "noindex", `${asset} should carry the noindex header`);
+    if (asset === "/robots.txt") {
+      assert.match(response.headers.get("content-type") ?? "", /^text\/plain\b/i);
+      assert.equal((await response.text()).replace(/\r\n/g, "\n"), "User-agent: *\nAllow: /\n");
+      continue;
+    }
     sourceBodies += await response.text();
   }
   for (const [asset, width, height] of [["favicon-16x16.png",16,16],["favicon-32x32.png",32,32],["favicon-48x48.png",48,48],["apple-touch-icon.png",180,180],["icon-192.png",192,192],["icon-512.png",512,512],["icon-512-maskable.png",512,512],["og-image.png",1200,630]]) {
@@ -92,16 +101,25 @@ test("production preview serves direct pages and safe public data", async () => 
   assert.equal(ico.readUInt16LE(4), 3, "favicon.ico should contain 16, 32 and 48 px images");
   const healthzStart = performance.now();
   const healthz = await fetch(`${base}/api/healthz`, { headers: { accept: "application/json" } });
-  assert.deepEqual(await healthz.json(), { status: "ok" });
+  assert.equal(healthz.headers.get("x-robots-tag"), "noindex");
+  const healthzBody = await healthz.json();
+  assert.deepEqual(healthzBody, { status: "ok" });
+  sourceBodies += JSON.stringify(healthzBody);
   assert.ok(performance.now() - healthzStart < 500, "health check should remain fast");
   const healthStart = performance.now();
-  const health = await (await fetch(`${base}/api/health`)).json();
+  const healthResponse = await fetch(`${base}/api/health`);
+  assert.equal(healthResponse.headers.get("x-robots-tag"), "noindex");
+  const health = await healthResponse.json();
+  sourceBodies += JSON.stringify(health);
   assert.deepEqual(Object.keys(health).sort(), ["discord", "nodeVersion", "status", "uptimeSeconds"].sort());
   assert.deepEqual(Object.keys(health.discord).sort(), ["guildCount", "pingMs", "status", "username"].sort());
   assert.ok(performance.now() - healthStart < 500, "health API should remain fast");
   const htmlHealth = await fetch(`${base}/api/healthz`, { headers: { accept: "text/html" } });
   assert.equal(htmlHealth.status, 200);
-  assert.match(await htmlHealth.text(), /data-shared-nav/);
+  assert.equal(htmlHealth.headers.get("x-robots-tag"), "noindex");
+  const htmlHealthBody = await htmlHealth.text();
+  assert.match(htmlHealthBody, /data-shared-nav/);
+  sourceBodies += htmlHealthBody;
 });
 
 test("public pages and responses do not disclose hidden command data or snowflake IDs", () => {

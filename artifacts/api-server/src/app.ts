@@ -9,6 +9,11 @@ import { readFileSync } from "node:fs";
 
 const app: Express = express();
 
+app.use((_req, res, next) => {
+  res.setHeader("X-Robots-Tag", "noindex");
+  next();
+});
+
 app.use(
   pinoHttp({
     logger,
