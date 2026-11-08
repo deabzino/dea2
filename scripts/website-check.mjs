@@ -133,12 +133,13 @@ try {
   listenConsole(changePage, "changelog");
   await changePage.goto(`${base}/changelog`, { waitUntil: "networkidle" });
   await changePage.waitForFunction(() => document.querySelectorAll(".timeline-entry").length > 0);
-  assert.equal(await changePage.locator(".timeline-entry").count(), 8);
+  const changelogEntryCount = await changePage.evaluate(async () => (await (await fetch("/changelog.json")).json()).length);
+  assert.equal(await changePage.locator(".timeline-entry").count(), changelogEntryCount);
   assert.match(await changePage.locator(".entry-date").first().textContent(), /ago/);
   assert.equal(await changePage.locator(".latest-badge").count(), 1);
   const changelogWidth = await changePage.locator(".timeline-entry").first().evaluate((node) => node.getBoundingClientRect().width / document.querySelector("main").getBoundingClientRect().width);
   assert.ok(changelogWidth > .95, `changelog cards should fill the content width, got ${changelogWidth}`);
-  assert.equal(await changePage.locator(".entry-arrow svg").count(), 8);
+  assert.equal(await changePage.locator(".entry-arrow svg").count(), changelogEntryCount);
   assert.notEqual(await changePage.locator(".entry-arrow svg").first().evaluate((node) => getComputedStyle(node).transform), "none", "expanded changelog chevron should be rotated");
   await changePage.locator(".entry-arrow").first().click();
   await changePage.waitForFunction(() => getComputedStyle(document.querySelector(".entry-arrow svg")).transform === "none");
@@ -149,7 +150,7 @@ try {
   await changePage.locator("#collapse-all").click();
   assert.equal(await changePage.locator(".timeline-entry[aria-expanded=true]").count(), 0);
   await changePage.locator("#expand-all").click();
-  assert.equal(await changePage.locator(".timeline-entry[aria-expanded=true]").count(), 8);
+  assert.equal(await changePage.locator(".timeline-entry[aria-expanded=true]").count(), changelogEntryCount);
   await changePage.locator("#change-search").fill("restart");
   assert.ok(await changePage.locator(".timeline-entry").count() > 0);
   await changePage.close();
