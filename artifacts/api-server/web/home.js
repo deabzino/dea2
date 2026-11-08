@@ -104,7 +104,7 @@
       ["user", ".list"],
       ["embed", "Dead Players", "Players currently marked dead are shown below. · Turhan · Voice channel: Voice 1 · Mute state: Server muted"],
       ["user", ".unmute"],
-      ["bot", "Unserver muted everyone in Voice 1 (1 member changed)."],
+      ["bot", "Server unmuted everyone in Voice 1 (1 member changed)."],
     ],
     lobby: [
       ["user", ".code ABCDEF"],
@@ -114,11 +114,21 @@
       ["user", ".mute"],
       ["bot", "Server muted everyone in Voice 1 (3 members changed)."],
       ["user", ".unmute"],
-      ["bot", "Unserver muted everyone in Voice 1 (3 members changed)."],
+      ["bot", "Server unmuted everyone in Voice 1 (3 members changed)."],
     ],
   };
   let timer = null;
-  let sequence = 0;
+  let kind = "round";
+  let turn = 0;
+  let charIndex = 0;
+  let active = false;
+  let demoVisible = false;
+  let typingRow = null;
+  const demoWindow = document.querySelector(".discord-window");
+  const inputText = document.querySelector(".chat-typed");
+  const inputPlaceholder = document.querySelector(".chat-placeholder");
+  const sendButton = document.querySelector(".chat-send");
+  const canPlay = () => active && !document.hidden && demoVisible && !reducedMotion.matches;
   const esc = (value) => String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   const makeMessage = (message) => {
     const user = message[0] === "user";
@@ -126,38 +136,102 @@
     if (embed) return `<div class="chat-message bot-message"><span class="chat-avatar bot-avatar"><img data-bot-avatar alt="" hidden><span>d</span></span><div><div class="chat-name">dea <span class="app-badge">APP</span><time>now</time></div><div class="chat-embed"><b>${esc(message[1])}</b>${esc(message[2])}</div></div></div>`;
     return `<div class="chat-message ${user ? "" : "bot-message"}"><span class="chat-avatar ${user ? "" : "bot-avatar"}">${user ? "" : '<img data-bot-avatar alt="" hidden><span>d</span>'}</span><div><div class="chat-name">${user ? "Arian" : 'dea <span class="app-badge">APP</span>'}<time>now</time></div><div class="chat-text">${esc(message[1])}</div></div></div>`;
   };
-  const play = (kind) => {
-    clearTimeout(timer);
-    const run = ++sequence;
-    messagesRoot.innerHTML = "";
+  const clearTimer = () => { clearTimeout(timer); timer = null; };
+  const setCompose = (value) => {
+    inputText.textContent = value;
+    const hasText = value.length > 0;
+    inputPlaceholder.hidden = hasText;
+    demoWindow.classList.toggle("has-draft", hasText);
+  };
+  const clearTyping = () => { if (typingRow) typingRow.remove(); typingRow = null; };
+  const scrollNewest = () => { messagesRoot.scrollTop = messagesRoot.scrollHeight; };
+  const appendMessage = (message) => {
+    messagesRoot.insertAdjacentHTML("beforeend", makeMessage(message));
+    const avatar = window.deaAvatarUrl;
+    if (avatar) messagesRoot.querySelectorAll("img[data-bot-avatar]").forEach((img) => {
+      if (img.src) return;
+      img.src = avatar; img.hidden = false;
+      img.addEventListener("error", () => { img.hidden = true; img.nextElementSibling.hidden = false; }, { once: true });
+      img.nextElementSibling.hidden = true;
+    });
+    scrollNewest();
+  };
+  const finishedTranscript = (which) => demos[which].map((message) => message[0] === "user" ? `Arian: ${message[1]}` : message[0] === "embed" ? `dea: ${message[1]}. ${message[2]}` : `dea: ${message[1]}`).join(" ");
+  const setTab = (which) => {
+    kind = which;
+    if (!document.hidden) { demoVisible = true; active = true; }
+    turn = 0; charIndex = 0;
+    clearTimer(); clearTyping();
+    setCompose("");
+    messagesRoot.replaceChildren();
+    $("chat-transcript").textContent = finishedTranscript(kind);
+    if (reducedMotion.matches) {
+      demos[kind].forEach(appendMessage);
+      return;
+    }
+    if (!document.hidden && !reducedMotion.matches) {
+      clearTimer();
+      timer = setTimeout(() => { timer = null; if (!document.hidden && !reducedMotion.matches) beginTurn(); }, 180);
+    }
+  };
+  const schedule = (delay, callback) => {
+    clearTimer();
+    if (!canPlay()) return;
+    timer = setTimeout(() => { timer = null; if (canPlay()) callback(); }, delay);
+  };
+  const beginTurn = () => {
     const messages = demos[kind];
-    let index = 0;
-    const next = () => {
-      if (run !== sequence || document.hidden) return;
-      if (index >= messages.length) {
-        timer = setTimeout(() => play(kind), 6500);
-        return;
-      }
-      const typing = document.createElement("div");
-      typing.className = "typing";
-      typing.innerHTML = '<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span> dea is typing';
-      messagesRoot.append(typing);
-      timer = setTimeout(() => {
-        typing.remove();
-        messagesRoot.insertAdjacentHTML("beforeend", makeMessage(messages[index++]));
-        const imgs = messagesRoot.querySelectorAll("img[data-bot-avatar]");
-        const avatar = window.deaAvatarUrl;
-        if (avatar) imgs.forEach((img) => { if (!img.src) { img.src = avatar; img.hidden = false; img.addEventListener("error", () => { img.hidden = true; img.nextElementSibling.hidden = false; }, { once: true }); img.nextElementSibling.hidden = true; } });
-        messagesRoot.scrollTop = messagesRoot.scrollHeight;
-        timer = setTimeout(next, 470);
-      }, 650);
+    if (turn >= messages.length) {
+      schedule(1800, () => {
+        messagesRoot.classList.add("is-fading");
+        schedule(500, () => { messagesRoot.replaceChildren(); messagesRoot.classList.remove("is-fading"); turn = 0; beginTurn(); });
+      });
+      return;
+    }
+    const message = messages[turn];
+    if (message[0] !== "user") {
+      typingRow = document.createElement("div");
+      typingRow.className = "typing";
+      typingRow.innerHTML = '<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span> dea is typing…';
+      messagesRoot.append(typingRow); scrollNewest();
+      schedule(700 + Math.random() * 400, () => {
+        clearTyping(); appendMessage(message); turn++;
+        schedule(800, beginTurn);
+      });
+      return;
+    }
+    charIndex = 0;
+    const typeNext = () => {
+      const command = message[1];
+      charIndex++;
+      setCompose(command.slice(0, charIndex));
+      if (charIndex < command.length) { schedule(45 + Math.random() * 30, typeNext); return; }
+      schedule(360, () => {
+        sendButton.classList.add("is-pressed");
+        schedule(120, () => {
+          sendButton.classList.remove("is-pressed"); setCompose(""); appendMessage(message); turn++;
+          schedule(320, beginTurn);
+        });
+      });
     };
-    next();
+    typeNext();
+  };
+  const resetForPause = () => {
+    clearTimer(); clearTyping(); setCompose(""); turn = 0;
+    messagesRoot.replaceChildren();
+  };
+  const updateActivity = () => {
+    if (reducedMotion.matches) return;
+    const shouldRun = !document.hidden && demoVisible;
+    if (!shouldRun) { active = false; resetForPause(); return; }
+    if (active) return;
+    active = true;
+    if (!reducedMotion.matches && messagesRoot.childElementCount === 0) schedule(180, beginTurn);
   };
   const demoTabs = [...document.querySelectorAll("[data-demo]")];
   demoTabs.forEach((button) => button.addEventListener("click", () => {
     demoTabs.forEach((item) => { const selected = item === button; item.setAttribute("aria-selected", String(selected)); item.tabIndex = selected ? 0 : -1; });
-    play(button.dataset.demo);
+    setTab(button.dataset.demo);
   }));
   demoTabs.forEach((button, index) => button.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -166,8 +240,20 @@
     const next = demoTabs[(index + offset + demoTabs.length) % demoTabs.length];
     next.focus(); next.click();
   }));
-  document.addEventListener("visibilitychange", () => { if (document.hidden) { sequence++; clearTimeout(timer); } else play(document.querySelector('[data-demo][aria-selected="true"]')?.dataset.demo || "round"); });
-  play("round");
+  document.addEventListener("visibilitychange", updateActivity);
+  reducedMotion.addEventListener("change", () => {
+    clearTimer(); clearTyping(); setCompose(""); messagesRoot.replaceChildren();
+    if (reducedMotion.matches) demos[kind].forEach(appendMessage);
+    else { active = false; updateActivity(); }
+  });
+  if ("IntersectionObserver" in window) {
+    const demoObserver = new IntersectionObserver(([entry]) => { demoVisible = entry.isIntersecting; updateActivity(); }, { threshold: 0.15 });
+    demoObserver.observe(demoWindow);
+  } else demoVisible = true;
+  active = false;
+  $("chat-transcript").textContent = finishedTranscript(kind);
+  if (reducedMotion.matches) demos[kind].forEach(appendMessage);
+  else updateActivity();
 
   const refreshStatus = () => fetch("/api/status", { cache: "no-store" }).then((response) => response.json()).then((data) => {
     window.deaAvatarUrl = data.avatarUrl || null;

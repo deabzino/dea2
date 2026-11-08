@@ -88,7 +88,7 @@
         } catch (e) {}
       })();
     </script>
-    <link rel="stylesheet" href="/site.css?v=5" />
+    <link rel="stylesheet" href="/site.css?v=6" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -226,25 +226,21 @@
               </button>
             </div>
           </div>
-          <div
-            class="discord-window"
-            role="img"
-            aria-label="Illustration of a Discord chat showing dea helping Arian run an Among Us round"
-          >
+          <div class="discord-window" aria-hidden="true">
             <div class="discord-top">
               <span class="channel-name"># general</span>
             </div>
             <div
               class="chat-messages"
               id="chat-messages"
-              aria-live="polite"
             ></div>
             <div class="chat-input">
               <span class="chat-add" aria-hidden="true">+</span
-              ><span>Message #general</span
-              ><span class="chat-tool" aria-hidden="true"></span>
+              ><span class="chat-compose"><span class="chat-placeholder">Message #general</span><span class="chat-typed"></span></span
+              ><span class="chat-tools" aria-hidden="true"><span class="chat-tool"></span><span class="chat-tool"></span><span class="chat-tool"></span></span><button class="chat-send" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.4 20.4 21 12 3.4 3.6l.1 6.5 12 1.9-12 1.9-.1 6.5Z"/></svg></button>
             </div>
           </div>
+          <div class="visually-hidden" id="chat-transcript"></div>
         </div>
       </section>
       <section class="live-strip shell reveal">
@@ -278,6 +274,6 @@
     </main>
     <div data-shared-footer></div>
     <script src="/shared.js?v=4" defer></script>
-    <script src="/home.js?v=3" defer></script>
+    <script src="/home.js?v=4" defer></script>
   </body>
 </html>

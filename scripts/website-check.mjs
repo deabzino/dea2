@@ -43,7 +43,7 @@ try {
 
   for (const route of ["/", "/commands", "/changelog", "/status", "/404.html"]) {
     const html = await (await fetch(`${base}${route}`)).text();
-    assert.ok(html.indexOf('id="theme-bootstrap"') < html.indexOf('href="/site.css?v=5"'), `${route} applies theme before CSS`);
+    assert.ok(html.indexOf('id="theme-bootstrap"') < html.indexOf('href="/site.css?v=6"'), `${route} applies theme before CSS`);
   }
 
   for (const [route, title] of [["/", "dea"], ["/commands", "Commands"], ["/changelog", "Changelog"], ["/status", "System status"]]) {
@@ -73,6 +73,23 @@ try {
     document.addEventListener("DOMContentLoaded", () => requestAnimationFrame(() => { window.__themeAtFirstFrame = document.documentElement.dataset.theme; }), { once: true });
   });
   await themePage.goto(`${base}/`);
+  await themePage.locator(".discord-window").scrollIntoViewIfNeeded();
+  await themePage.waitForFunction(() => document.querySelector(".chat-input")?.classList.contains("has-draft") || document.querySelector(".discord-window")?.classList.contains("has-draft"));
+  assert.equal(await themePage.locator("#chat-messages .typing").count(), 0, "typing row must stay hidden while the composer has text");
+  await themePage.waitForFunction(() => document.querySelector("#chat-messages .chat-message:not(.bot-message)"));
+  assert.equal(await themePage.locator("#chat-messages .typing").count(), 0, "typing row must not appear during Arian's typing/send sequence");
+  await themePage.waitForFunction(() => [...document.querySelectorAll("#chat-messages .chat-message")].some((message) => message.classList.contains("bot-message")) && document.querySelector("#chat-messages .typing"));
+  assert.equal(await themePage.locator("#chat-messages .typing").isVisible(), true, "dea typing row should appear after Arian's message and before the reply");
+  await themePage.waitForFunction(() => document.querySelector("#chat-messages .typing") && document.querySelector("#chat-messages .chat-message.bot-message"));
+  await themePage.waitForFunction(() => !document.querySelector("#chat-messages .typing"));
+  assert.ok(await themePage.locator("#chat-messages .chat-message.bot-message").count() > 0, "dea reply should remain after the typing row disappears");
+  await themePage.locator('[data-demo="lobby"]').click();
+  assert.equal(await themePage.locator("#chat-messages .chat-message").count(), 0, "switching tabs clears the previous conversation");
+  assert.equal(await themePage.locator("#chat-messages .typing").count(), 0, "switching tabs clears the typing row");
+  assert.equal(await themePage.locator(".chat-typed").textContent(), "", "switching tabs empties the composer");
+  await themePage.waitForFunction(() => document.querySelector("#chat-messages .chat-message")?.textContent.includes(".code ABCDEF"), { timeout: 6000 });
+  await themePage.locator('[data-demo="round"]').click();
+  await themePage.waitForFunction(() => document.querySelector("#chat-messages .chat-message")?.textContent.includes(".dead @Turhan"));
   assert.equal(await themePage.evaluate(() => window.__themeAtFirstFrame), "light", "saved theme should be applied before the first rendered frame");
   assert.equal(await themePage.locator("html").getAttribute("data-theme"), "light");
   await themePage.waitForFunction(() => document.querySelector("#hero-command-count")?.textContent.match(/^\d+ commands · slash and prefix$/));

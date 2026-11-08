@@ -52,7 +52,7 @@ test("production preview serves direct pages and safe public data", async () => 
     assert.equal(response.headers.get("x-robots-tag"), "noindex", `${route} should be excluded from indexing`);
     const body = await response.text();
     assert.match(body, /name="robots" content="noindex"/);
-    assert.match(body, /site\.css\?v=5/);
+    assert.match(body, /site\.css\?v=6/);
     assert.match(body, /og:image/);
     assert.match(body, /twitter:card.*summary_large_image/);
     assert.doesNotMatch(body, /__SITE_URL__/);
@@ -82,7 +82,7 @@ test("production preview serves direct pages and safe public data", async () => 
     const html = await (await fetch(`${base}${route}`)).text();
     for (const href of ["/favicon.ico?v=3", "/favicon-16x16.png?v=3", "/favicon-32x32.png?v=3", "/favicon-48x48.png?v=3", "/favicon.svg?v=3", "/apple-touch-icon.png?v=3", "/icon-192.png?v=3", "/icon-512.png?v=3", "/site.webmanifest?v=3"]) assert.ok(html.includes(href), `${route} should link ${href}`);
   }
-  for (const asset of ["/changelog.json", "/shared.js?v=4", "/home.js?v=3", "/commands.js?v=1", "/changelog.js?v=2", "/status.js?v=1", "/site.css?v=5", "/site.webmanifest?v=3", "/robots.txt", "/favicon.svg?v=3"]) {
+  for (const asset of ["/changelog.json", "/shared.js?v=4", "/home.js?v=4", "/commands.js?v=1", "/changelog.js?v=2", "/status.js?v=1", "/site.css?v=6", "/site.webmanifest?v=3", "/robots.txt", "/favicon.svg?v=3"]) {
     const response = await fetch(`${base}${asset}`);
     assert.equal(response.status, 200, `${asset} should be included in the deployed output`);
     assert.equal(response.headers.get("x-robots-tag"), "noindex", `${asset} should carry the noindex header`);
