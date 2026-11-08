@@ -2,31 +2,88 @@
   const $ = (id) => document.getElementById(id);
   const voiceCard = document.querySelector(".voice-card");
   const voicePlayers = document.querySelector(".voice-players");
-  const voiceState = document.querySelector("[data-voice-state]");
   const voiceStatus = document.querySelector("[data-voice-status]");
   let voiceTimer = null;
+  let resumeTimer = null;
   let meeting = false;
-  const setVoiceState = () => {
-    meeting = !meeting;
+  let cardVisible = false;
+  let pausedUntil = 0;
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  const setMic = (row) => {
+    const dead = row.dataset.dead === "true";
+    const muted = !meeting || dead;
+    const icon = row.querySelector(".mic-icon");
+    icon.setAttribute("aria-label", muted ? "Microphone muted" : "Microphone on");
+    icon.innerHTML = muted
+      ? '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8m-1-14 7 7m0-7-7 7"/>'
+      : '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8"/>';
+  };
+  const renderPlayers = () => voicePlayers.querySelectorAll(".voice-player").forEach((row) => {
+    const dead = row.dataset.dead === "true";
+    row.classList.toggle("dead-player", dead);
+    row.setAttribute("aria-label", `Mark ${row.dataset.playerName} as ${dead ? "alive" : "dead"}`);
+    row.querySelector(".dead-label").hidden = !dead;
+    setMic(row);
+  });
+  const updateState = (nextMeeting, announce = true) => {
+    meeting = nextMeeting;
     voiceCard.dataset.voiceState = meeting ? "meeting" : "playing";
     voicePlayers.dataset.voiceMode = meeting ? "meeting" : "playing";
-    voiceState.textContent = meeting ? "Meeting" : "Playing";
-    voiceStatus.textContent = meeting ? "Server muted everyone" : "Dead player server-muted";
-    voicePlayers.querySelectorAll(".voice-player").forEach((row, index) => {
-      const muted = meeting || index === 2;
-      const icon = row.querySelector(".mic-icon");
-      icon.setAttribute("aria-label", muted ? "Microphone muted" : "Microphone on");
-      icon.innerHTML = muted
-        ? '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8m-1-14 7 7m0-7-7 7"/>'
-        : '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8"/>';
+    voiceCard.querySelectorAll("[data-game-state]").forEach((button) => {
+      const selected = button.dataset.gameState === (meeting ? "meeting" : "playing");
+      button.setAttribute("aria-pressed", String(selected));
+      button.classList.toggle("is-selected", selected);
     });
+    renderPlayers();
+    if (announce) voiceStatus.textContent = meeting ? "Server unmuted everyone" : "Server muted everyone";
   };
-  const startVoiceLoop = () => {
-    clearInterval(voiceTimer);
-    if (voiceCard && !document.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) voiceTimer = setInterval(setVoiceState, 4200);
+  const stopLoop = () => { clearInterval(voiceTimer); voiceTimer = null; };
+  const startLoop = () => {
+    stopLoop();
+    if (!reducedMotion.matches && !document.hidden && cardVisible && Date.now() >= pausedUntil) {
+      voiceTimer = setInterval(() => updateState(!meeting), 4800);
+    }
   };
-  document.addEventListener("visibilitychange", startVoiceLoop);
-  if (voiceCard) { voiceCard.dataset.voiceState = "playing"; startVoiceLoop(); }
+  const pauseForInteraction = () => {
+    pausedUntil = Date.now() + 15000;
+    stopLoop();
+    clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(startLoop, 15000);
+  };
+  if (voiceCard) {
+    voiceCard.dataset.voiceState = "playing";
+    renderPlayers();
+    voiceCard.addEventListener("pointerdown", pauseForInteraction);
+    voiceCard.addEventListener("keydown", pauseForInteraction);
+    voiceCard.addEventListener("click", (event) => {
+      const stateButton = event.target.closest("[data-game-state]");
+      if (stateButton) {
+        updateState(stateButton.dataset.gameState === "meeting");
+        return;
+      }
+      const row = event.target.closest(".voice-player");
+      if (row) {
+        const dead = row.dataset.dead !== "true";
+        row.dataset.dead = String(dead);
+        renderPlayers();
+        voiceStatus.textContent = dead
+          ? `Marked ${row.dataset.playerName} as dead and server-muted them.`
+          : `Cleared ${row.dataset.playerName} from the dead list.`;
+        return;
+      }
+      if (event.target.closest("[data-new-round]")) {
+        voicePlayers.querySelectorAll(".voice-player").forEach((player) => { player.dataset.dead = "false"; });
+        renderPlayers();
+        voiceStatus.textContent = "Started a new round.";
+      }
+    });
+    document.addEventListener("visibilitychange", startLoop);
+    reducedMotion.addEventListener("change", startLoop);
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver(([entry]) => { cardVisible = entry.isIntersecting; startLoop(); }, { threshold: 0.15 });
+      observer.observe(voiceCard);
+    } else { cardVisible = true; startLoop(); }
+  }
   const heroCommandCount = $("hero-command-count");
   if (heroCommandCount) fetch("/api/commands", { cache: "no-store" }).then((response) => {
     if (!response.ok) throw new Error();

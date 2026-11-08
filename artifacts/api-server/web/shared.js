@@ -1,8 +1,14 @@
 (() => {
+  if ("scrollRestoration" in history) history.scrollRestoration = "auto";
   const svg = (name) => name === "sun"
     ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>'
     : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.7 8.7 0 1 0 20.5 15.2Z"/><path d="m17.5 3 .6 1.5 1.4.5-1.4.6-.6 1.4-.5-1.4-1.5-.6 1.5-.5.5-1.5Z"/></svg>';
   const path = location.pathname.replace(/\/$/, "") || "/";
+  if (path === "/" && location.hash === "#features") {
+    const landOnFeatures = () => requestAnimationFrame(() => document.getElementById("features")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" }));
+    if (document.readyState === "complete") landOnFeatures();
+    else addEventListener("load", landOnFeatures, { once: true });
+  }
   const links = [
     ["Features", "/#features", path === "/"],
     ["Commands", "/commands", path === "/commands"],
@@ -36,7 +42,7 @@
     const next = root.dataset.theme === "light" ? "dark" : "light";
     root.style.setProperty("--theme-x", `${event.clientX}px`);
     root.style.setProperty("--theme-y", `${event.clientY}px`);
-    const change = () => { root.dataset.theme = next; localStorage.setItem("dea-theme", next); color(); };
+    const change = () => { root.dataset.theme = next; try { localStorage.setItem("dea-theme", next); } catch {} color(); };
     if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(change);
     else change();
   });
@@ -82,4 +88,23 @@
       img.nextElementSibling.hidden = true;
     });
   }).catch(() => {});
+
+  // Warm only same-origin page links, and respect the browser's data saver preference.
+  const prefetched = new Set();
+  const prefetch = (event) => {
+    if (navigator.connection?.saveData) return;
+    const link = event.target.closest?.("a[href]");
+    if (!link) return;
+    let url;
+    try { url = new URL(link.href, location.href); } catch { return; }
+    if (url.origin !== location.origin || url.pathname === "/api" || url.pathname.startsWith("/api/") || url.href === location.href || prefetched.has(url.href)) return;
+    prefetched.add(url.href);
+    const hint = document.createElement("link");
+    hint.rel = "prefetch";
+    hint.href = url.href;
+    document.head.append(hint);
+  };
+  document.addEventListener("pointerover", (event) => { if (event.pointerType !== "touch") prefetch(event); });
+  document.addEventListener("focusin", prefetch);
+  document.addEventListener("touchstart", prefetch, { passive: true });
 })();

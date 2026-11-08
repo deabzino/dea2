@@ -69,8 +69,7 @@
       type="image/png"
     />
     <link rel="manifest" href="/site.webmanifest?v=2" />
-    <link rel="stylesheet" href="/site.css?v=2" />
-    <script>
+    <script id="theme-bootstrap">
       (function () {
         try {
           var t = localStorage.getItem("dea-theme");
@@ -85,6 +84,7 @@
         } catch (e) {}
       })();
     </script>
+    <link rel="stylesheet" href="/site.css?v=4" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -102,6 +102,6 @@
       <a class="button primary" href="/">Back to home <span>↗</span></a>
     </main>
     <div data-shared-footer></div>
-    <script src="/shared.js?v=1" defer></script>
+    <script src="/shared.js?v=4" defer></script>
   </body>
 </html>

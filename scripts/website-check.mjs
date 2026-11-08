@@ -41,6 +41,11 @@ try {
   }
   assert.ok(ready, `Website preview failed to start: ${stderr}`);
 
+  for (const route of ["/", "/commands", "/changelog", "/status", "/404.html"]) {
+    const html = await (await fetch(`${base}${route}`)).text();
+    assert.ok(html.indexOf('id="theme-bootstrap"') < html.indexOf('href="/site.css?v=4"'), `${route} applies theme before CSS`);
+  }
+
   for (const [route, title] of [["/", "dea"], ["/commands", "Commands"], ["/changelog", "Changelog"], ["/status", "System status"]]) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on("pageerror", (error) => consoleErrors.push(`${route}: ${error.message}`));
@@ -60,18 +65,51 @@ try {
   listenConsole(themePage, "theme");
   const avatarFixture = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#5865f2"/><path d="M5 12 11 14 14 8 16 12 18 8 21 14 27 12 25 21 20 18 16 24 12 18 7 21Z" fill="white"/></svg>')}`;
   await themePage.route("**/api/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ avatarUrl: avatarFixture, botOnline: true, currentTime: new Date().toISOString(), serverCount: 0, discordPingMs: 1 }) }));
+  await themePage.addInitScript(() => {
+    if (!sessionStorage.getItem("theme-check-set")) {
+      localStorage.setItem("dea-theme", "light");
+      sessionStorage.setItem("theme-check-set", "1");
+    }
+    document.addEventListener("DOMContentLoaded", () => requestAnimationFrame(() => { window.__themeAtFirstFrame = document.documentElement.dataset.theme; }), { once: true });
+  });
   await themePage.goto(`${base}/`);
-  assert.equal(await themePage.locator("html").getAttribute("data-theme"), "dark");
+  assert.equal(await themePage.evaluate(() => window.__themeAtFirstFrame), "light", "saved theme should be applied before the first rendered frame");
+  assert.equal(await themePage.locator("html").getAttribute("data-theme"), "light");
   await themePage.waitForFunction(() => document.querySelector("#hero-command-count")?.textContent.match(/^\d+ commands · slash and prefix$/));
   assert.equal(await themePage.locator("#hero-command-count").textContent(), "12 commands · slash and prefix");
   assert.equal(await themePage.locator(".mini-avatars").count(), 0);
   assert.equal(await themePage.locator(".voice-card").count(), 1, "hero voice channel card should render");
   await themePage.waitForFunction(() => { const img = document.querySelector(".voice-bot-avatar img"); return img?.complete && img.naturalWidth > 0; });
   assert.equal(await themePage.locator(".voice-bot-avatar img").getAttribute("src"), avatarFixture, "hero card should use the shared bot pfp URL");
+  const voiceRows = themePage.locator(".voice-player");
+  assert.deepEqual(await voiceRows.evaluateAll((rows) => rows.map((row) => row.dataset.playerName)), ["Turhan", "Arian", "Sanuar", "Sabbir"]);
+  assert.ok(await voiceRows.evaluateAll((rows) => rows.every((row) => row.querySelector(".mic-icon").getAttribute("aria-label") === "Microphone muted")), "Playing should mute everyone");
+  await themePage.locator('[data-game-state="meeting"]').click();
+  assert.equal(await themePage.locator('[data-game-state="meeting"]').getAttribute("aria-pressed"), "true");
+  assert.equal(await themePage.locator('[data-game-state="playing"]').getAttribute("aria-pressed"), "false");
+  assert.equal(await themePage.locator("[data-voice-status]").textContent(), "Server unmuted everyone");
+  assert.equal(await voiceRows.nth(1).locator(".mic-icon").getAttribute("aria-label"), "Microphone on", "Meeting should unmute alive players");
+  assert.equal(await voiceRows.first().locator(".mic-icon").getAttribute("aria-label"), "Microphone muted", "dead players stay muted in a meeting");
+  await voiceRows.nth(1).click();
+  assert.equal(await voiceRows.nth(1).getAttribute("data-dead"), "true");
+  assert.equal(await voiceRows.nth(1).getAttribute("aria-label"), "Mark Arian as alive");
+  assert.equal(await themePage.locator("[data-voice-status]").textContent(), "Marked Arian as dead and server-muted them.");
+  assert.equal(await voiceRows.nth(1).locator(".mic-icon").getAttribute("aria-label"), "Microphone muted");
+  await voiceRows.nth(1).click();
+  assert.equal(await voiceRows.nth(1).getAttribute("data-dead"), "false");
+  assert.equal(await themePage.locator("[data-voice-status]").textContent(), "Cleared Arian from the dead list.");
+  await themePage.locator("[data-new-round]").click();
+  assert.equal(await voiceRows.evaluateAll((rows) => rows.every((row) => row.dataset.dead === "false")), true);
+  assert.equal(await voiceRows.first().locator(".dead-label").isHidden(), true);
+  assert.equal(await themePage.locator("[data-voice-status]").textContent(), "Started a new round.");
   const phonePage = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: "light" });
   await phonePage.route("**/api/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ avatarUrl: avatarFixture, botOnline: true, currentTime: new Date().toISOString(), serverCount: 0, discordPingMs: 1 }) }));
   await phonePage.goto(`${base}/`, { waitUntil: "networkidle" });
   assert.equal(await phonePage.locator(".voice-bot-avatar img").evaluate((img) => img.complete && img.naturalWidth > 0), true, "hero pfp should load at phone width");
+  await phonePage.locator('[data-game-state="meeting"]').click();
+  await phonePage.waitForFunction(() => { const button = document.querySelector('[data-game-state="meeting"]'); const probe = document.createElement("span"); probe.style.color = "var(--red)"; document.body.append(probe); const expected = getComputedStyle(probe).color; probe.remove(); return button?.classList.contains("is-selected") && getComputedStyle(button).color === expected; });
+  assert.equal(await phonePage.locator('[data-game-state="meeting"]').evaluate((button) => button.classList.contains("is-selected")), true, "Meeting state should use the theme's red accent in light mode");
+  assert.equal(await phonePage.locator(".voice-player").evaluateAll((rows) => rows.every((row) => { const card = row.closest(".voice-card").getBoundingClientRect(); const bounds = row.getBoundingClientRect(); return bounds.left >= card.left && bounds.right <= card.right; })), true, "voice rows should not be clipped at phone width");
   assert.equal(await phonePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "home page should have no horizontal scroll at 390px");
   await phonePage.close();
   assert.equal(await themePage.locator(".window-users").textContent(), "#", "the chat header should not show fake user avatars");
@@ -88,9 +126,9 @@ try {
   });
   assert.equal(desktopCta, true, "decorative CTA ring should fit inside the card on desktop");
   await themePage.locator(".theme-toggle").click();
-  await themePage.waitForFunction(() => document.documentElement.dataset.theme === "light");
+  await themePage.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   await themePage.reload();
-  assert.equal(await themePage.locator("html").getAttribute("data-theme"), "light");
+  assert.equal(await themePage.locator("html").getAttribute("data-theme"), "dark");
   await themePage.close();
 
   const commandPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
@@ -125,7 +163,7 @@ try {
   const copyButton = deadCard.locator(".copy-button");
   await copyButton.click();
   await assert.doesNotReject(() => commandPage.waitForFunction(() => document.querySelector('.command-card[aria-expanded="true"] .copy-button')?.textContent === "Copied!"));
-  assert.equal(await commandPage.evaluate(() => navigator.clipboard.readText()), ".dead @Jess");
+  assert.equal(await commandPage.evaluate(() => navigator.clipboard.readText()), ".dead @Turhan");
   await commandPage.close();
 
   const changePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -208,6 +246,31 @@ try {
   assert.equal(await widthPage.locator(".desktop-links a").filter({ hasText: "Bot status" }).count(), 1);
   assert.equal(await widthPage.locator(".site-footer nav a").filter({ hasText: "Bot status" }).count(), 1);
   await widthPage.close();
+
+  const navigationPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  navigationPage.on("pageerror", (error) => consoleErrors.push(`navigation: ${error.message}`));
+  listenConsole(navigationPage, "navigation");
+  await navigationPage.goto(`${base}/commands`, { waitUntil: "networkidle" });
+  assert.equal(await navigationPage.evaluate(() => history.scrollRestoration), "auto", "browser history should restore page scroll positions");
+  assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Commands");
+  await navigationPage.evaluate(() => scrollTo({ top: 500, behavior: "instant" }));
+  await navigationPage.waitForFunction(() => scrollY > 300);
+  await navigationPage.locator('.desktop-links a[href="/changelog"]').click();
+  await navigationPage.waitForLoadState("networkidle");
+  assert.ok(await navigationPage.evaluate(() => scrollY < 5), "normal navigation starts at the top");
+  assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Changelog");
+  await navigationPage.goBack({ waitUntil: "networkidle" });
+  assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Commands", "back navigation restores the previous page");
+  await navigationPage.locator('.desktop-links a[href="/status"]').click();
+  await navigationPage.waitForLoadState("networkidle");
+  assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Bot status");
+  await navigationPage.locator('.desktop-links a[href="/#features"]').click();
+  await navigationPage.waitForLoadState("networkidle");
+  await navigationPage.waitForFunction(() => location.pathname === "/" && location.hash === "#features");
+  await pause(800);
+  const featureAnchor = await navigationPage.locator("#features").evaluate((node) => ({ top: node.getBoundingClientRect().top, scrollY, href: location.href }));
+  assert.ok(featureAnchor.top >= 80 && featureAnchor.top < 220, `feature anchor should land below the sticky nav: ${JSON.stringify(featureAnchor)}`);
+  await navigationPage.close();
 
   const shots = [
     ["home", "/"], ["commands", "/commands"], ["changelog", "/changelog"], ["status", "/status"],
