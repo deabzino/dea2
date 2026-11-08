@@ -5,7 +5,12 @@
     : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.7 8.7 0 1 0 20.5 15.2Z"/><path d="m17.5 3 .6 1.5 1.4.5-1.4.6-.6 1.4-.5-1.4-1.5-.6 1.5-.5.5-1.5Z"/></svg>';
   const path = location.pathname.replace(/\/$/, "") || "/";
   if (path === "/" && location.hash === "#features") {
-    const landOnFeatures = () => requestAnimationFrame(() => document.getElementById("features")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" }));
+    const landOnFeatures = () => requestAnimationFrame(() => {
+      const section = document.getElementById("features");
+      if (!section) return;
+      const top = section.getBoundingClientRect().top + scrollY - 90;
+      scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    });
     if (document.readyState === "complete") landOnFeatures();
     else addEventListener("load", landOnFeatures, { once: true });
   }

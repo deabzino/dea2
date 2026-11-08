@@ -43,7 +43,7 @@ try {
 
   for (const route of ["/", "/commands", "/changelog", "/status", "/404.html"]) {
     const html = await (await fetch(`${base}${route}`)).text();
-    assert.ok(html.indexOf('id="theme-bootstrap"') < html.indexOf('href="/site.css?v=4"'), `${route} applies theme before CSS`);
+    assert.ok(html.indexOf('id="theme-bootstrap"') < html.indexOf('href="/site.css?v=5"'), `${route} applies theme before CSS`);
   }
 
   for (const [route, title] of [["/", "dea"], ["/commands", "Commands"], ["/changelog", "Changelog"], ["/status", "System status"]]) {
@@ -111,8 +111,17 @@ try {
   assert.equal(await phonePage.locator('[data-game-state="meeting"]').evaluate((button) => button.classList.contains("is-selected")), true, "Meeting state should use the theme's red accent in light mode");
   assert.equal(await phonePage.locator(".voice-player").evaluateAll((rows) => rows.every((row) => { const card = row.closest(".voice-card").getBoundingClientRect(); const bounds = row.getBoundingClientRect(); return bounds.left >= card.left && bounds.right <= card.right; })), true, "voice rows should not be clipped at phone width");
   assert.equal(await phonePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "home page should have no horizontal scroll at 390px");
+  const ctaAt390 = await phonePage.locator(".final-cta").evaluate((box) => {
+    const card = box.getBoundingClientRect();
+    const content = [...box.querySelectorAll(".eyebrow, h2, p, .button")].map((node) => node.getBoundingClientRect());
+    return { contained: content.every((item) => item.left >= card.left && item.right <= card.right), gap: content[3].top - content[2].bottom };
+  });
+  assert.equal(ctaAt390.contained, true, "CTA copy and button should fit inside the card at 390px");
+  assert.ok(ctaAt390.gap >= 10, "CTA button should have comfortable spacing at 390px");
   await phonePage.close();
-  assert.equal(await themePage.locator(".window-users").textContent(), "#", "the chat header should not show fake user avatars");
+  assert.equal(await themePage.locator(".channel-name").evaluate((node) => node.textContent.trim()), "# general", "chat header should show the centered general channel");
+  assert.equal(await themePage.locator(".discord-top > *").count(), 1, "chat header should contain only the centered channel name");
+  assert.equal(await themePage.locator(".chat-input").textContent().then((text) => text.includes("Message #general")), true);
   const featureMetrics = await themePage.locator(".feature-card").evaluateAll((cards) => {
     const boxes = cards.map((card) => ({ card: card.getBoundingClientRect(), chip: card.querySelector(".feature-link").getBoundingClientRect() }));
     return { heights: boxes.map(({ card }) => card.height), bottoms: boxes.map(({ card, chip }) => card.bottom - chip.bottom) };
@@ -121,14 +130,17 @@ try {
   assert.ok(Math.max(...featureMetrics.bottoms) - Math.min(...featureMetrics.bottoms) < 1, "feature command chips should align at the bottom");
   const desktopCta = await themePage.locator(".final-cta").evaluate((box) => {
     const card = box.getBoundingClientRect();
-    const ring = box.querySelector(".cta-orb").getBoundingClientRect();
-    return ring.left >= card.left && ring.top >= card.top && ring.right <= card.right && ring.bottom <= card.bottom;
+    const content = [...box.querySelectorAll(".eyebrow, h2, p, .button")].map((node) => node.getBoundingClientRect());
+    return { contained: content.every((item) => item.left >= card.left && item.right <= card.right), gap: content[3].top - content[2].bottom, glow: getComputedStyle(box).backgroundImage.includes("radial-gradient") };
   });
-  assert.equal(desktopCta, true, "decorative CTA ring should fit inside the card on desktop");
+  assert.equal(desktopCta.contained, true, "CTA copy and button should fit inside the card on desktop");
+  assert.ok(desktopCta.gap >= 10, "CTA button should have comfortable spacing below the copy");
+  assert.equal(desktopCta.glow, true, "CTA should retain its soft gradient glow");
   await themePage.locator(".theme-toggle").click();
   await themePage.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   await themePage.reload();
   assert.equal(await themePage.locator("html").getAttribute("data-theme"), "dark");
+  assert.ok(await themePage.locator(".final-cta").evaluate((box) => getComputedStyle(box).backgroundImage.includes("radial-gradient")), "CTA glow should remain in dark mode");
   await themePage.close();
 
   const commandPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
@@ -226,10 +238,12 @@ try {
   await phone.goto(`${base}/`);
   const phoneCta = await phone.locator(".final-cta").evaluate((box) => {
     const card = box.getBoundingClientRect();
-    const ring = box.querySelector(".cta-orb").getBoundingClientRect();
-    return ring.left >= card.left && ring.top >= card.top && ring.right <= card.right && ring.bottom <= card.bottom;
+    const content = [...box.querySelectorAll(".eyebrow, h2, p, .button")].map((node) => node.getBoundingClientRect());
+    return { contained: content.every((item) => item.left >= card.left && item.right <= card.right), gap: content[3].top - content[2].bottom, glow: getComputedStyle(box).backgroundImage.includes("radial-gradient") };
   });
-  assert.equal(phoneCta, true, "decorative CTA ring should fit inside the card on phones");
+  assert.equal(phoneCta.contained, true, "CTA copy and button should fit inside the card at phone width");
+  assert.ok(phoneCta.gap >= 10, "phone CTA button should have comfortable spacing below the copy");
+  assert.equal(phoneCta.glow, true, "CTA should retain its soft gradient glow on phones");
   await phone.locator('[data-demo="lobby"]').click();
   await phone.waitForFunction(() => document.querySelector("#chat-messages")?.textContent.includes(".code ABCDEF"), { timeout: 6000 });
   await phone.close();
@@ -257,17 +271,20 @@ try {
   await navigationPage.waitForFunction(() => scrollY > 300);
   await navigationPage.locator('.desktop-links a[href="/changelog"]').click();
   await navigationPage.waitForLoadState("networkidle");
+  await pause(250);
   assert.ok(await navigationPage.evaluate(() => scrollY < 5), "normal navigation starts at the top");
   assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Changelog");
   await navigationPage.goBack({ waitUntil: "networkidle" });
+  await pause(250);
   assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Commands", "back navigation restores the previous page");
   await navigationPage.locator('.desktop-links a[href="/status"]').click();
   await navigationPage.waitForLoadState("networkidle");
+  await pause(250);
   assert.equal(await navigationPage.locator('.desktop-links a[aria-current="page"]').textContent(), "Bot status");
   await navigationPage.locator('.desktop-links a[href="/#features"]').click();
   await navigationPage.waitForLoadState("networkidle");
   await navigationPage.waitForFunction(() => location.pathname === "/" && location.hash === "#features");
-  await pause(800);
+  await navigationPage.waitForFunction(() => { const section = document.querySelector("#features"); const top = section?.getBoundingClientRect().top; return top >= 80 && top < 220; }, { timeout: 10_000 });
   const featureAnchor = await navigationPage.locator("#features").evaluate((node) => ({ top: node.getBoundingClientRect().top, scrollY, href: location.href }));
   assert.ok(featureAnchor.top >= 80 && featureAnchor.top < 220, `feature anchor should land below the sticky nav: ${JSON.stringify(featureAnchor)}`);
   await navigationPage.close();
