@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commandLogDetails, formatRoleList, formatUserLabel, optionalActorField, sanitizeLogText, deletedByLabel } from "./logFormatting.ts";
-import { describeVoiceChanges, VoiceLogBatcher } from "./voiceLogBatcher.ts";
+import { commandLogDetails, escapeMarkdown, formatRoleList, formatUser, formatUserLabel, inlineCode, optionalActorField, sanitizeLogText, deletedByLabel } from "./logFormatting.ts";
+import { describeVoiceChanges, summarizeVoiceChanges, VoiceLogBatcher } from "./voiceLogBatcher.ts";
 
 const GUILD = "1014163878478884997";
 const USER = "692768149665349672";
@@ -34,26 +34,47 @@ test("voice transitions have clear titles and no boolean text", () => {
     assert.equal(changes[0]?.title, expected);
     assert.doesNotMatch(changes.map((change) => change.text).join(" "), /\b(?:true|false)\b/i);
   }
-  assert.match(describeVoiceChanges(fixture(null), fixture("a"))[0].text, /🔊 Voice 1/);
-  assert.match(describeVoiceChanges(fixture("a"), fixture(null))[0].text, /Left: 🔊 Voice 1/);
+  assert.match(describeVoiceChanges(fixture(null), fixture("a"))[0].text, /Voice 1/);
+  assert.match(describeVoiceChanges(fixture("a"), fixture(null))[0].text, /Left: .*Voice 1/);
   assert.match(describeVoiceChanges(fixture("a"), fixture("b"))[0].text, /From: Voice 1 → To: Voice 2/);
+});
+
+test("joins ignore stale voice flags, while same channel flag changes remain visible", () => {
+  const changes = describeVoiceChanges(fixture(null, { serverMute: true, serverDeaf: true, selfMute: true, selfDeaf: true, streaming: true, selfVideo: true }), fixture("a"));
+  assert.deepEqual(changes.map((change) => change.title), ["Joined voice channel"]);
+  const sameChannel = describeVoiceChanges(fixture("a"), fixture("a", { serverMute: true, selfDeaf: true, streaming: true }));
+  assert.deepEqual(sameChannel.map((change) => change.title), ["Server muted", "Deafened themselves", "Started streaming"]);
+  assert.deepEqual(describeVoiceChanges(fixture("a", { selfMute: true }), fixture("b")), [{ title: "Switched voice channel", text: "From: Voice 1 → To: Voice 2", color: 0x5865f2 }]);
+});
+
+test("voice summary prioritizes main events and collapses reconnects and moves", () => {
+  const self = { title: "Undeafened themselves", text: "Undeafened themselves", color: 2 };
+  const left = { title: "Left voice channel", text: "Left: Voice 1", color: 3 };
+  const joinedSame = { title: "Joined voice channel", text: "Joined Voice 1", color: 1 };
+  assert.equal(summarizeVoiceChanges([self, left]).title, "Left voice channel");
+  assert.deepEqual(summarizeVoiceChanges([left, joinedSame]), { title: "Reconnected to Voice 1", color: 0x57f287, changes: [] });
+  assert.equal(summarizeVoiceChanges([left, { ...joinedSame, text: "Joined Voice 2" }]).title, "Moved from Voice 1 to Voice 2");
 });
 
 test("voice bursts for one member are combined in order and flush at shutdown", async () => {
   const emitted = [];
-  const batcher = new VoiceLogBatcher((key, changes) => { emitted.push({ key, changes: changes.map((change) => change.text) }); }, 3_000, 2);
+  const batcher = new VoiceLogBatcher((key, changes) => { emitted.push({ key, changes: changes.map((change) => change.text) }); }, 3_000, 4);
   batcher.add(`${GUILD}:${USER}`, { title: "Joined voice channel", text: "Joined Voice 1", color: 1 });
+  batcher.add(`${GUILD}:123456789012345678`, { title: "Joined voice channel", text: "Joined Voice 2", color: 1 });
   await new Promise((resolve) => setTimeout(resolve, 100));
   batcher.add(`${GUILD}:${USER}`, { title: "Server muted", text: "Was server-muted by dea", color: 2 });
   await new Promise((resolve) => setTimeout(resolve, 100));
   batcher.add(`${GUILD}:${USER}`, { title: "Muted themselves", text: "Muted themselves", color: 2 });
   assert.equal(emitted.length, 0);
   await new Promise((resolve) => setTimeout(resolve, 3_100));
-  assert.deepEqual(emitted, [{ key: `${GUILD}:${USER}`, changes: ["Joined Voice 1", "Was server-muted by dea", "Muted themselves"] }]);
+  assert.deepEqual(emitted, [
+    { key: `${GUILD}:123456789012345678`, changes: ["Joined Voice 2"] },
+    { key: `${GUILD}:${USER}`, changes: ["Joined Voice 1", "Was server-muted by dea", "Muted themselves"] },
+  ]);
 
   batcher.add("shutdown-user", { title: "Left voice channel", text: "Left: Voice 1", color: 3 });
   batcher.flushAll();
-  assert.equal(emitted.length, 2);
+  assert.equal(emitted.length, 3);
   assert.equal(batcher.size, 0);
 
   const capped = new VoiceLogBatcher((key, changes) => { emitted.push({ key, changes: changes.map((change) => change.text) }); }, 60_000, 1);
@@ -67,17 +88,23 @@ test("voice bursts for one member are combined in order and flush at shutdown", 
 test("message deletion wording handles audit matches, users and bots", () => {
   assert.equal(
     deletedByLabel(USER, "keruptedd", null, null, "available"),
-    `\u2063{MentionUser:${USER}}\u2063 (keruptedd; probably deleted their own message)`,
+    "Probably themselves",
   );
   assert.equal(
     deletedByLabel(USER, "keruptedd", "123456789012345678", "moderator", "available"),
-    "\u2063{MentionUser:123456789012345678}\u2063 (moderator)",
+    "<@123456789012345678> (moderator)",
   );
   assert.equal(
     deletedByLabel(USER, "keruptedd", null, null, "permission_missing"),
-    `Actor not identified (View Audit Log permission missing); author: \u2063{MentionUser:${USER}}\u2063 (keruptedd)`,
+    "Probably themselves",
   );
-  assert.equal(deletedByLabel(null, null, null, null, "unavailable"), "Actor not identified (audit log unavailable); author: author not identified");
+  assert.equal(deletedByLabel(null, null, null, null, "unavailable"), "");
+});
+
+test("message content markdown and attachment filenames are escaped", () => {
+  assert.equal(escapeMarkdown("hello_world *x*"), "hello\\_world \\*x\\*");
+  const filename = "Desktop2026.11.08-_23.21.29.02.DVR.mp4";
+  assert.equal(inlineCode(filename), "`Desktop2026.11.08-_23.21.29.02.DVR.mp4`");
 });
 
 test("log formatting omits empty brackets and actor placeholders", () => {
@@ -85,7 +112,15 @@ test("log formatting omits empty brackets and actor placeholders", () => {
   assert.equal(formatUserLabel("Arian", "Arian"), "@Arian");
   assert.equal(formatUserLabel("Arian", null), "@Arian");
   assert.deepEqual(optionalActorField(""), []);
+  assert.deepEqual(optionalActorField(""), []); // self initiated actions omit Actor
   assert.deepEqual(optionalActorField("@Moderator"), [["Actor", "@Moderator"]]);
+});
+
+test("shared user mentions retain readable escaped usernames", () => {
+  assert.equal(formatUser(USER, "raheema1x", "Raheema"), `<@${USER}> (raheema1x)`);
+  assert.equal(formatUser(USER, "raheema1x", "raheema1x"), `<@${USER}>`);
+  assert.equal(formatUser(USER, null, "Raheema"), `<@${USER}>`);
+  assert.equal(formatUser(USER, "raheema_*x", "Raheema"), `<@${USER}> (raheema\\_\\*x)`);
 });
 
 test("command details include prefix and channel mention without empty options", () => {

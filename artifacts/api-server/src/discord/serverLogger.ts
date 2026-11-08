@@ -10,8 +10,8 @@ import {
   type TextBasedChannel,
 } from "discord.js";
 import { prisma } from "../lib/prisma";
-import { describeVoiceChanges, VoiceLogBatcher } from "./voiceLogBatcher";
-import { commandLogDetails, deletedByLabel, formatRoleList, formatUserLabel, optionalActorField, sanitizeLogText } from "./logFormatting";
+import { describeVoiceChanges, summarizeVoiceChanges, VoiceLogBatcher } from "./voiceLogBatcher";
+import { commandLogDetails, deletedByLabel, escapeMarkdown, formatRoleList, formatUser, inlineCode, optionalActorField, sanitizeLogText } from "./logFormatting";
 
 export type LogCategory =
   | "messages"
@@ -76,9 +76,9 @@ function idText(value: string | null | undefined): string {
 }
 
 function userText(id: string, name?: string | null): string {
-  const username = globalClient?.users.cache.get(id)?.username ?? name?.split("#")[0] ?? "member";
+  const username = globalClient?.users.cache.get(id)?.username ?? name?.split("#")[0] ?? null;
   const displayName = globalClient?.guilds.cache.find((guild) => guild.members.cache.has(id))?.members.cache.get(id)?.displayName;
-  return `${formatUserLabel(displayName ?? username, username)}${idMarker("User", id)}`;
+  return `${formatUser(id, username, displayName)}${idMarker("User", id)}`;
 }
 
 function idMarker(kind: string, id: string): string { return `\u2063{${kind}:${id}}\u2063`; }
@@ -312,12 +312,15 @@ export function markVoiceChangeByBot(guildId: string, userId: string): void {
   botVoiceChanges.set(`${guildId}:${userId}`, now);
 }
 export function logCommand(guild: Guild, userId: string, command: string, options: string, channelId: string, prefix = false): void {
+  const user = globalClient?.users.cache.get(userId);
+  const displayName = guild.members.cache.get(userId)?.displayName;
   enqueue(guild, "commands", embed(guild, `${prefix ? "Prefix" : "Slash"} command used`, COLORS.command,
-    commandLogDetails(userId, command, truncate(options, 1024), channelId, prefix)));
+    commandLogDetails(userId, command, truncate(options, 1024), channelId, prefix, user?.username, displayName)));
 }
 
 export function logCommandError(guild: Guild, userId: string, command: string, error: unknown, channelId?: string): void {
-  enqueue(guild, "commands", embed(guild, "Command error", COLORS.delete, [["Who", `<@${userId}>`], ["Actor", `<@${userId}>`], ["Command", command], ...(channelId ? [["Channel", `<#${channelId}>`] as [string, string]] : []), ["Error", error instanceof Error ? error.message : String(error)] ]));
+  const user = globalClient?.users.cache.get(userId);
+  enqueue(guild, "commands", embed(guild, "Command error", COLORS.delete, [["Who", userText(userId, user?.username)], ["Actor", userText(userId, user?.username)], ["Command", command], ...(channelId ? [["Channel", `<#${channelId}>`] as [string, string]] : []), ["Error", error instanceof Error ? error.message : String(error)] ]));
 }
 
 function readProperty(value: unknown, key: string): unknown {
@@ -430,7 +433,7 @@ function messageContent(message: Message): string {
 }
 
 function attachmentDetails(message: Message): string {
-  return [...message.attachments.values()].map((attachment) => attachment.name ?? "Attachment").join("\n") || "No attachments";
+  return [...message.attachments.values()].map((attachment) => inlineCode(attachment.name ?? "Attachment")).join("\n") || "No attachments";
 }
 
 export function registerServerLogger(client: Client): void {
@@ -467,8 +470,8 @@ export function registerServerLogger(client: Client): void {
       );
       const authorAvatar = guild.members.cache.get(snapshot.authorId)?.displayAvatarURL({ extension: "png", size: 128 });
       enqueue(guild, "messages", embed(guild, "Message deleted", COLORS.delete, [
-        ["Who", userText(snapshot.authorId, snapshot.authorTag)], ["Actor", deletedBy],
-        ["Channel", idText(snapshot.channelId)], ["Content", snapshot.content], ["Attachments", snapshot.attachments],
+        ["Who", userText(snapshot.authorId, snapshot.authorTag)], ...optionalActorField(deletedBy),
+        ["Channel", `${idText(snapshot.channelId)}${idMarker("Message", snapshot.id)}`], ["Content", escapeMarkdown(snapshot.content)], ["Attachments", snapshot.attachments.split("\n").map(inlineCode).join("\n")],
       ], undefined, snapshot.imageUrl, authorAvatar));
       snapshots.delete(message.id);
     }
@@ -478,8 +481,8 @@ export function registerServerLogger(client: Client): void {
     const before = oldMessage.partial ? snapshots.get(oldMessage.id)?.content : messageContent(oldMessage);
     const fetched = newMessage.partial ? await newMessage.fetch().catch(() => newMessage) : newMessage;
     enqueue(newMessage.guild, "messages", embed(newMessage.guild, "Message updated", COLORS.update, [
-      ["Who", fetched.author ? userText(fetched.author.id, fetched.author.tag) : "Member not identified"],
-      ["Actor", fetched.author ? userText(fetched.author.id, fetched.author.tag) : "Actor not identified"],
+      ["Who", fetched.author ? userText(fetched.author.id, fetched.author.username) : "Member not identified"],
+      ...optionalActorField(fetched.author ? userText(fetched.author.id, fetched.author.username) : ""),
       ["Channel", idText(fetched.channelId)], ["Before", before ?? "No previous snapshot available"],
       ["After", messageContent(fetched)], ["Attachments", attachmentDetails(fetched)],
     ], undefined, imageUrlFromMessage(fetched)), undefined, fetched);
@@ -494,21 +497,21 @@ export function registerServerLogger(client: Client): void {
       const who = affected.length > 10 ? `${affected.slice(0, 10).join(", ")} +${affected.length - 10} more` : affected.join(", ");
       enqueue(first.guild, "messages", embed(first.guild, "Messages bulk deleted", COLORS.delete, [
         ["Who", who || "Message authors not identified"],
-        ["Actor", actor || "Actor not identified"], ["Channel", idText(first.channelId)], ["Count", String(messages.size)],
+        ...optionalActorField(actor), ["Channel", idText(first.channelId)], ["Count", String(messages.size)],
       ]));
     }
   });
   safe(Events.MessageReactionAdd, async (reaction: any, user: any) => {
     const message = reaction.message as Message;
-    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction added", COLORS.create, [["Who", message.author ? userText(message.author.id, message.author.tag) : "Message author not identified"], ["Actor", userText(user.id, user.tag)], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
+    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction added", COLORS.create, [["Who", message.author ? userText(message.author.id, message.author.username) : "Message author not identified"], ["Actor", userText(user.id, user.username)], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
   });
   safe(Events.MessageReactionRemove, async (reaction: any, user: any) => {
     const message = reaction.message as Message;
-    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction removed", COLORS.delete, [["Who", message.author ? userText(message.author.id, message.author.tag) : "Message author not identified"], ["Actor", userText(user.id, user.tag)], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
+    if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction removed", COLORS.delete, [["Who", message.author ? userText(message.author.id, message.author.username) : "Message author not identified"], ["Actor", userText(user.id, user.username)], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]]), undefined, message);
   });
-  safe(Events.MessageReactionRemoveAll, async (message: Message) => { if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "All reactions removed", COLORS.delete, [["Who", message.author ? userText(message.author.id, message.author.tag) : "Message author not identified"], ["Actor", "Actor not recorded in this event"], ["Message", message.id], ["Channel", idText(message.channelId)]])); });
-  safe(Events.MessageReactionRemoveEmoji, async (reaction: any) => { const message = reaction.message as Message; if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction emoji removed", COLORS.delete, [["Who", message.author ? userText(message.author.id, message.author.tag) : "Message author not identified"], ["Actor", "Actor not recorded in this event"], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]])); });
-  safe(Events.ChannelPinsUpdate, async (channel: any) => { if (channel.guild) enqueue(channel.guild, "messages", embed(channel.guild, "Channel pins updated", COLORS.update, [["Actor", await auditActor(channel.guild, AuditLogEvent.MessagePin) || "Actor not identified"], ["Channel", idText(channel.id)]])); });
+  safe(Events.MessageReactionRemoveAll, async (message: Message) => { if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "All reactions removed", COLORS.delete, [["Who", message.author ? userText(message.author.id, message.author.username) : "Message author not identified"], ["Message", message.id], ["Channel", idText(message.channelId)]])); });
+  safe(Events.MessageReactionRemoveEmoji, async (reaction: any) => { const message = reaction.message as Message; if (message.guild) enqueue(message.guild, "messages", embed(message.guild, "Reaction emoji removed", COLORS.delete, [["Who", message.author ? userText(message.author.id, message.author.username) : "Message author not identified"], ["Emoji", reaction.emoji.toString()], ["Message", message.id], ["Channel", idText(message.channelId)]])); });
+  safe(Events.ChannelPinsUpdate, async (channel: any) => { if (channel.guild) enqueue(channel.guild, "messages", embed(channel.guild, "Channel pins updated", COLORS.update, [...optionalActorField(await auditActor(channel.guild, AuditLogEvent.MessagePin)), ["Channel", idText(channel.id)]])); });
   safe(Events.MessageCreate, async (message: Message) => {
     if (message.guild) rememberMessage(message);
   });
@@ -521,15 +524,15 @@ export function registerServerLogger(client: Client): void {
       console.warn("Could not identify the invite used by a joining member", error);
     }
     enqueue(member.guild, "members", embed(member.guild, "Member joined", COLORS.create, [
-      ["Who", userText(member.id, member.user.tag)],
-      ["Actor", attribution.actor],
+      ["Who", userText(member.id, member.user.username)],
+      ...optionalActorField(attribution.actor.toLowerCase().includes("not identified") ? "" : attribution.actor),
       ["Account age", `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`],
       ["Invite", attribution.detail],
     ]));
   });
-  safe(Events.GuildMemberRemove, async (member: GuildMember) => enqueue(member.guild, "members", embed(member.guild, "Member left", COLORS.delete, [["Who", userText(member.id, member.user.tag)], ["Actor", await auditActor(member.guild, AuditLogEvent.MemberKick, member.id) || "Voluntary leave or actor not identified"]])));
-  safe(Events.GuildBanAdd, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member banned", COLORS.delete, [["Who", userText(ban.user.id, ban.user.tag)], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id) || "Actor not identified"], ["Reason", ban.reason ?? "No reason provided"]])));
-  safe(Events.GuildBanRemove, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member unbanned", COLORS.create, [["Who", userText(ban.user.id, ban.user.tag)], ["Actor", await auditActor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id) || "Actor not identified"], ["Reason", ban.reason ?? "No reason provided"]])));
+  safe(Events.GuildMemberRemove, async (member: GuildMember) => enqueue(member.guild, "members", embed(member.guild, "Member left", COLORS.delete, [["Who", userText(member.id, member.user.username)], ...optionalActorField(await auditActor(member.guild, AuditLogEvent.MemberKick, member.id)), ["Reason", "Member left or was removed"]])));
+  safe(Events.GuildBanAdd, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member banned", COLORS.delete, [["Who", userText(ban.user.id, ban.user.username)], ...optionalActorField(await auditActor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id)), ["Reason", ban.reason ?? "No reason provided"]])));
+  safe(Events.GuildBanRemove, async (ban: any) => enqueue(ban.guild, "members", embed(ban.guild, "Member unbanned", COLORS.create, [["Who", userText(ban.user.id, ban.user.username)], ...optionalActorField(await auditActor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id)), ["Reason", ban.reason ?? "No reason provided"]])));
   safe(Events.GuildMemberUpdate, async (oldMember: GuildMember, member: GuildMember) => {
     const changes: Array<[string, string]> = [];
     if (oldMember.nickname !== member.nickname) changes.push(["Nickname", `${oldMember.nickname ?? "none"} → ${member.nickname ?? "none"}`]);
@@ -540,7 +543,7 @@ export function registerServerLogger(client: Client): void {
     if (oldMember.communicationDisabledUntilTimestamp !== member.communicationDisabledUntilTimestamp) changes.push(["Timeout", member.communicationDisabledUntilTimestamp ? `until <t:${Math.floor(member.communicationDisabledUntilTimestamp / 1000)}:F>` : "removed"]);
     if (changes.length) {
       const actor = await auditActor(member.guild, AuditLogEvent.MemberUpdate, member.id, true);
-      enqueue(member.guild, "members", embed(member.guild, "Member updated", COLORS.update, [...optionalActorField(actor || "Actor not identified"), ["Who", userText(member.id, member.user.tag)], ...changes]));
+      enqueue(member.guild, "members", embed(member.guild, "Member updated", COLORS.update, [...optionalActorField(actor), ["Who", userText(member.id, member.user.username)], ...changes]));
     }
   });
   safe(Events.UserUpdate, async (oldUser: any, user: any) => { for (const guild of globalClient?.guilds.cache.values() ?? []) { if (oldUser.username !== user.username || oldUser.globalName !== user.globalName || oldUser.avatar !== user.avatar) enqueue(guild, "members", embed(guild, "User profile updated", COLORS.update, [["Who", userText(user.id, user.tag)], ["Actor", userText(user.id, user.tag)], ["Username", `${oldUser.username} → ${user.username}`], ["Global name", `${oldUser.globalName ?? "none"} → ${user.globalName ?? "none"}`], ["Avatar", oldUser.avatar !== user.avatar ? "changed" : "unchanged"]])); } });
@@ -548,17 +551,29 @@ export function registerServerLogger(client: Client): void {
   const voiceBatcher = new VoiceLogBatcher(async (key, changes) => {
     const context = voiceMembers.get(key);
     if (!context || !changes.length) return;
+    const summary = summarizeVoiceChanges(changes);
+    if (!summary) return;
     const botDidIt = context.member.id === globalClient?.user?.id || botVoiceChanges.has(key);
     botVoiceChanges.delete(key);
-    const actorType = changes[0]!.title === "Left voice channel" ? AuditLogEvent.MemberDisconnect
-      : changes[0]!.title === "Switched voice channel" ? AuditLogEvent.MemberMove : null;
+    const hasServerChange = changes.some((change) => change.title.startsWith("Server "));
+    const actorType = changes.some((change) => change.title === "Left voice channel") ? AuditLogEvent.MemberDisconnect
+      : changes.some((change) => change.title === "Switched voice channel" || change.title === "Joined voice channel") ? AuditLogEvent.MemberMove : null;
     const memberLabel = userText(context.member.id, context.member.displayName);
-    const actor = botDidIt ? "dea" : actorType ? await auditActor(context.guild, actorType, context.member.id) : "";
-    const write = enqueue(context.guild, "voice", embed(context.guild, changes[0]!.title, changes[changes.length - 1]!.color, [
+    let actor = "";
+    if (botDidIt && hasServerChange && globalClient?.user) actor = userText(globalClient.user.id, globalClient.user.username);
+    else if (actorType || hasServerChange) actor = await auditActor(context.guild, actorType ?? AuditLogEvent.MemberUpdate, context.member.id, true);
+    if (actor === memberLabel || actor.includes(`{User:${context.member.id}}`)) actor = "";
+    const details = [...summary.changes];
+    const hasChannel = !!context.member.voice.channelId;
+    if (!hasChannel) {
+      const endpoint = changes.find((change) => change.title === "Left voice channel");
+      if (endpoint) details.unshift(endpoint.text);
+    }
+    const write = enqueue(context.guild, "voice", embed(context.guild, summary.title, summary.color, [
       ["Who", memberLabel],
-      ["Actor", actor || (changes.some((change) => /themselves/.test(change.title)) ? memberLabel : "Actor not identified")],
+      ...optionalActorField(actor),
       ...(context.member.voice.channelId ? [["Channel", idText(context.member.voice.channelId)] as [string, string]] : []),
-      ["Changes", changes.map((change) => change.text).join(", then ")],
+      ["Changes", details.join(", then ")],
     ], undefined, undefined, context.member.displayAvatarURL({ extension: "png", size: 128 })));
     pendingVoiceWrites.add(write);
     void write.finally(() => pendingVoiceWrites.delete(write));
@@ -589,7 +604,7 @@ export function registerServerLogger(client: Client): void {
       inviter: invite.inviter ? userText(invite.inviter.id, invite.inviter.tag) : "creator not identified",
     });
     enqueue(guild, "server", embed(guild, "Invite created", COLORS.create, [
-      ["Actor", invite.inviter ? userText(invite.inviter.id, invite.inviter.tag) : "Invite creator not identified"],
+      ...optionalActorField(invite.inviter ? userText(invite.inviter.id, invite.inviter.username) : ""),
       ["Code", invite.code],
       ["Channel", idText(invite.channelId)],
       ["Uses", `${invite.uses ?? 0}${invite.maxUses ? ` / ${invite.maxUses}` : " / unlimited"}`],
@@ -606,7 +621,7 @@ export function registerServerLogger(client: Client): void {
     enqueue(guild, "channels", embed(guild, "Thread members updated", COLORS.update, [
       ["Thread", genericTarget(thread)],
       ["Who", `Added: ${formatMembers(added)}; removed: ${formatMembers(removed)}`],
-      ["Actor", "Actor not recorded in this event"],
+      ...optionalActorField(""),
       ...(thread.id ? [["Channel", `<#${thread.id}>`] as [string, string]] : []),
       ["Added", formatMembers(added)],
       ["Removed", formatMembers(removed)],
@@ -618,8 +633,7 @@ export function registerServerLogger(client: Client): void {
       if (!guild) return;
       enqueue(guild, "server", embed(guild, title, color, [
         ["Event", genericTarget(event)],
-        ["Who", user ? userText(user.id, user.tag ?? user.username) : "Member not identified"],
-        ["Actor", user ? userText(user.id, user.tag ?? user.username) : "Actor not identified"],
+        ["Who", user ? userText(user.id, user.username) : "Member not identified"],
         ...(event.channelId ? [["Channel", `<#${event.channelId}>`] as [string, string]] : []),
       ]));
     };
@@ -629,7 +643,7 @@ export function registerServerLogger(client: Client): void {
     const guild = execution.guild as Guild | undefined;
     if (!guild) return;
     enqueue(guild, "automod", embed(guild, "Automod action executed", COLORS.delete, [
-      ["Who", execution.user ? userText(execution.user.id, execution.user.tag) : "Member not identified"],
+      ["Who", execution.user ? userText(execution.user.id, execution.user.username) : "Member not identified"],
       ["Actor", "AutoMod"], ["Rule", execution.autoModerationRule?.name ?? execution.ruleId],
       ...(execution.channelId ? [["Channel", `<#${execution.channelId}>`] as [string, string]] : []),
       ["Action", displayValue(execution.action)],
@@ -705,12 +719,12 @@ export function registerServerLogger(client: Client): void {
           : readProperty(item, "id");
       const actor = config.auditType
         ? await auditActor(guild, config.auditType, id ? String(id) : undefined)
-        : "Actor not recorded";
+        : "";
       const details = config.update
         ? changedProperties(previous, item, trackedProperties[config.category])
         : [];
       const values: Array<[string, string]> = [
-        ["Actor", actor || "Actor not identified"],
+        ...optionalActorField(actor),
         ["Target", genericTarget(item)],
       ];
       const channelId = readProperty(item, "channelId");
