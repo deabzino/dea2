@@ -1,4 +1,5 @@
 [
+  {"date":"2026-11-08T21:28:01.000Z","title":"Clearer server activity","changes":[{"type":"Removed","text":"Unneeded server activity details have been removed."}]},
   {"date":"2026-11-08T20:25:00.000Z","title":"More updates for your crew","changes":[{"type":"Added","text":"New command features give your crew more ways to manage a round."},{"type":"Added","text":"New activity details make it easier to follow what happens in your server."}]},
   {"date":"2026-11-08T20:05:35.000Z","title":"More updates for your crew","changes":[{"type":"Improved","text":"dea's Discord features are easier to use."},{"type":"Improved","text":"The dea website is clearer and easier to browse."}]},
   {"date":"2026-11-08T16:05:59.000Z","title":"More updates for your crew","changes":[{"type":"Improved","text":"dea's Discord features are easier to use."},{"type":"Improved","text":"The dea website is clearer and easier to browse."}]},
