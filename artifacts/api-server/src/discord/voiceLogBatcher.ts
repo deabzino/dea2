@@ -52,11 +52,11 @@ export function describeVoiceChanges(oldState: any, newState: any): VoiceLogChan
   const newChannel = newState.channel;
   const oldId = oldState.channelId;
   const newId = newState.channelId;
-  const label = (channel: any) => channel?.name ?? "voice channel";
+  const label = (channel: any, id?: string | null) => id && /^[0-9]{17,20}$/.test(id) ? `<#${id}>` : channel?.name ?? "voice channel";
   const add = (title: string, text: string, color: number) => changes.push({ title, text, color });
-  if (!oldId && newId) add("Joined voice channel", `Joined 🔊 ${label(newChannel)}`, 0x57f287);
-  else if (oldId && !newId) add("Left voice channel", `Left: 🔊 ${label(oldChannel)}`, 0xed4245);
-  else if (oldId && newId && oldId !== newId) add("Switched voice channel", `From: ${label(oldChannel)} → To: ${label(newChannel)}`, 0x5865f2);
+  if (!oldId && newId) add("Joined voice channel", `Joined 🔊 ${label(newChannel, newId)}`, 0x57f287);
+  else if (oldId && !newId) add("Left voice channel", `Left: 🔊 ${label(oldChannel, oldId)}`, 0xed4245);
+  else if (oldId && newId && oldId !== newId) add("Switched voice channel", `From: ${label(oldChannel, oldId)} → To: ${label(newChannel, newId)}`, 0x5865f2);
   if (oldState.serverMute !== newState.serverMute) add(newState.serverMute ? "Server muted" : "Server unmuted", newState.serverMute ? "Was server-muted" : "Was server-unmuted", 0xf2c879);
   if (oldState.serverDeaf !== newState.serverDeaf) add(newState.serverDeaf ? "Server deafened" : "Server undeafened", newState.serverDeaf ? "Was server-deafened" : "Was server-undeafened", 0xf2c879);
   if (oldState.selfMute !== newState.selfMute) add(newState.selfMute ? "Muted themselves" : "Unmuted themselves", newState.selfMute ? "Muted themselves" : "Unmuted themselves", 0xf2c879);

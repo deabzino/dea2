@@ -3,6 +3,7 @@ import {
   ChannelType,
   EmbedBuilder,
   Events,
+  PermissionFlagsBits,
   type Client,
   type Guild,
   type GuildMember,
@@ -11,7 +12,7 @@ import {
 } from "discord.js";
 import { prisma } from "../lib/prisma";
 import { describeVoiceChanges, VoiceLogBatcher } from "./voiceLogBatcher";
-import { deletedByLabel, sanitizeLogText } from "./logFormatting";
+import { commandLogDetails, deletedByLabel, formatRoleList, formatUserLabel, optionalActorField, sanitizeLogText } from "./logFormatting";
 
 export type LogCategory =
   | "messages"
@@ -78,7 +79,7 @@ function idText(value: string | null | undefined): string {
 function userText(id: string, name?: string | null): string {
   const username = globalClient?.users.cache.get(id)?.username ?? name?.split("#")[0] ?? "member";
   const displayName = globalClient?.guilds.cache.find((guild) => guild.members.cache.has(id))?.members.cache.get(id)?.displayName;
-  return `@${displayName ?? username}${displayName && displayName !== username ? ` (${username})` : ""}${idMarker("User", id)}`;
+  return `${formatUserLabel(displayName ?? username, username)}${idMarker("User", id)}`;
 }
 
 function idMarker(kind: string, id: string): string { return `\u2063{${kind}:${id}}\u2063`; }
@@ -168,14 +169,31 @@ export async function ignoreLogTarget(guildId: string, kind: "channel" | "role" 
   return configureLogs(guildId, { [key]: values });
 }
 
-async function auditActor(guild: Guild, type: AuditLogEvent, targetId?: string): Promise<string> {
-  try {
-    const logs = await guild.fetchAuditLogs({ type, limit: 6 });
-    const entry = logs.entries.find((item) => Date.now() - item.createdTimestamp < 8_000 && (!targetId || (item.target as { id?: string } | null)?.id === targetId));
-  return entry?.executor ? userText(entry.executor.id, entry.executor.tag) : "Actor not recorded";
-  } catch {
-    return "Actor not recorded";
+let warnedMissingAuditPermission = false;
+async function auditActor(guild: Guild, type: AuditLogEvent, targetId?: string, retry = false): Promise<string> {
+  const me = guild.members.me;
+  if (me && !me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+    if (!warnedMissingAuditPermission) {
+      warnedMissingAuditPermission = true;
+      console.warn("Server event logs cannot identify actors because the bot is missing View Audit Log permission.");
+    }
+    return "";
   }
+  try {
+    for (let attempt = 0; attempt < (retry ? 2 : 1); attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 1_500));
+      const now = Date.now();
+      const logs = await guild.fetchAuditLogs({ type, limit: 6 });
+      const entry = logs.entries.find((item) => now - item.createdTimestamp >= 0 && now - item.createdTimestamp <= (retry ? 10_000 : 8_000) && (!targetId || (item.target as { id?: string } | null)?.id === targetId));
+      if (entry?.executor) return userText(entry.executor.id, entry.executor.tag);
+    }
+  } catch (error) {
+    if ((error as { code?: number }).code === 50013 && !warnedMissingAuditPermission) {
+      warnedMissingAuditPermission = true;
+      console.warn("Server event logs cannot identify actors because the bot is missing View Audit Log permission.");
+    }
+  }
+  return "";
 }
 
 async function messageDeleteActor(guild: Guild, authorId: string, channelId: string): Promise<string> {
@@ -208,10 +226,10 @@ function embed(guild: Guild, title: string, color: number, details: Array<[strin
   const ids = new Map<string, string>();
   const clean = (value: string) => sanitizeLogText(value
     .replace(/<@!?([0-9]{17,20})>/g, (_all, id: string) => `${userText(id, globalClient?.users.cache.get(id)?.username)}`)
-    .replace(/<#([0-9]{17,20})>/g, (_all, id: string) => idText(id))
+    .replace(/<#([0-9]{17,20})>/g, (_all, id: string) => `<#${id}>`)
     .replace(/<@&([0-9]{17,20})>/g, (_all, id: string) => `${guild.roles.cache.get(id)?.name ?? "role"}${idMarker("Role", id)}`), guild.id, ids);
   if (target) ids.set(`Target ID ${target}`, "");
-  const fields = details.map(([name, value]) => ({ name: truncate(clean(name), 256), value: truncate(clean(value) || "No additional details", 1024), inline: true }));
+  const fields = details.filter(([, value]) => value.trim().length > 0).map(([name, value]) => ({ name: truncate(clean(name), 256), value: truncate(clean(value) || "No additional details", 1024), inline: true }));
   const footerIds = [...ids.keys()].join(" • ");
   const result = new EmbedBuilder()
     .setTitle(title)
@@ -278,13 +296,12 @@ export function markVoiceChangeByBot(guildId: string, userId: string): void {
   botVoiceChanges.set(`${guildId}:${userId}`, now);
 }
 export function logCommand(guild: Guild, userId: string, command: string, options: string, channelId: string, prefix = false): void {
-  enqueue(guild, "commands", embed(guild, `${prefix ? "Prefix" : "Slash"} command used`, COLORS.command, [
-    ["Who", `<@${userId}> (${userId})`], ["Command", `\`${command}\``], ["Options", truncate(options || "none", 1024)], ["Channel", idText(channelId)],
-  ]));
+  enqueue(guild, "commands", embed(guild, `${prefix ? "Prefix" : "Slash"} command used`, COLORS.command,
+    commandLogDetails(userId, command, truncate(options, 1024), channelId, prefix)));
 }
 
 export function logCommandError(guild: Guild, userId: string, command: string, error: unknown): void {
-  enqueue(guild, "commands", embed(guild, "Command error", COLORS.delete, [["Who", `<@${userId}> (${userId})`], ["Command", command], ["Error", error instanceof Error ? error.message : String(error)] ]));
+  enqueue(guild, "commands", embed(guild, "Command error", COLORS.delete, [["Who", `<@${userId}>`], ["Command", command], ["Error", error instanceof Error ? error.message : String(error)] ]));
 }
 
 function readProperty(value: unknown, key: string): unknown {
@@ -485,21 +502,28 @@ export function registerServerLogger(client: Client): void {
     if (oldMember.nickname !== member.nickname) changes.push(["Nickname", `${oldMember.nickname ?? "none"} → ${member.nickname ?? "none"}`]);
     const added = member.roles.cache.filter((role) => !oldMember.roles.cache.has(role.id)).map((role) => role.name);
     const removed = oldMember.roles.cache.filter((role) => !member.roles.cache.has(role.id)).map((role) => role.name);
-    if (added.length) changes.push(["Roles added", added.join(", ")]);
-    if (removed.length) changes.push(["Roles removed", removed.join(", ")]);
+    if (added.length) changes.push(["Roles added", formatRoleList(added)]);
+    if (removed.length) changes.push(["Roles removed", formatRoleList(removed)]);
     if (oldMember.communicationDisabledUntilTimestamp !== member.communicationDisabledUntilTimestamp) changes.push(["Timeout", member.communicationDisabledUntilTimestamp ? `until <t:${Math.floor(member.communicationDisabledUntilTimestamp / 1000)}:F>` : "removed"]);
-    if (changes.length) enqueue(member.guild, "members", embed(member.guild, "Member updated", COLORS.update, [["Who", await auditActor(member.guild, AuditLogEvent.MemberUpdate, member.id)], ["Member", userText(member.id, member.user.tag)], ...changes]));
+    if (changes.length) {
+      const actor = await auditActor(member.guild, AuditLogEvent.MemberUpdate, member.id, true);
+      enqueue(member.guild, "members", embed(member.guild, "Member updated", COLORS.update, [...optionalActorField(actor), ["Member", userText(member.id, member.user.tag)], ...changes]));
+    }
   });
   safe(Events.UserUpdate, async (oldUser: any, user: any) => { for (const guild of globalClient?.guilds.cache.values() ?? []) { if (oldUser.username !== user.username || oldUser.globalName !== user.globalName || oldUser.avatar !== user.avatar) enqueue(guild, "members", embed(guild, "User profile updated", COLORS.update, [["User", userText(user.id, user.tag)], ["Username", `${oldUser.username} → ${user.username}`], ["Global name", `${oldUser.globalName ?? "none"} → ${user.globalName ?? "none"}`], ["Avatar", oldUser.avatar !== user.avatar ? "changed" : "unchanged"]])); } });
   const voiceMembers = new Map<string, { guild: Guild; member: GuildMember }>();
-  const voiceBatcher = new VoiceLogBatcher((key, changes) => {
+  const voiceBatcher = new VoiceLogBatcher(async (key, changes) => {
     const context = voiceMembers.get(key);
     if (!context || !changes.length) return;
     const botDidIt = context.member.id === globalClient?.user?.id || botVoiceChanges.has(key);
     botVoiceChanges.delete(key);
+    const actorType = changes[0]!.title === "Left voice channel" ? AuditLogEvent.MemberDisconnect
+      : changes[0]!.title === "Switched voice channel" ? AuditLogEvent.MemberMove : null;
+    const memberLabel = userText(context.member.id, context.member.displayName);
+    const actor = botDidIt ? "dea" : actorType ? await auditActor(context.guild, actorType, context.member.id) : "";
     const write = enqueue(context.guild, "voice", embed(context.guild, changes[0]!.title, changes[changes.length - 1]!.color, [
-      ["Member", userText(context.member.id, context.member.displayName)],
-      ["Changed by", botDidIt ? "dea" : "Member"],
+      ["Member", memberLabel],
+      ...(actor && actor !== memberLabel ? [["Changed by", actor] as [string, string]] : []),
       ["Changes", changes.map((change) => change.text).join(", then ")],
     ], undefined, undefined, context.member.displayAvatarURL({ extension: "png", size: 128 })));
     pendingVoiceWrites.add(write);

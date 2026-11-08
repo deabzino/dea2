@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sanitizeLogText, deletedByLabel } from "./logFormatting.ts";
+import { commandLogDetails, formatRoleList, formatUserLabel, optionalActorField, sanitizeLogText, deletedByLabel } from "./logFormatting.ts";
 import { describeVoiceChanges, VoiceLogBatcher } from "./voiceLogBatcher.ts";
 
 const GUILD = "1014163878478884997";
@@ -70,6 +70,27 @@ test("message deletion wording handles audit matches, users and bots", () => {
   assert.equal(deletedByLabel("", true), "Probably removed by a bot or the author");
 });
 
+test("log formatting omits empty brackets and actor placeholders", () => {
+  assert.equal(formatUserLabel("Arian", "keruptedd"), "@Arian (keruptedd)");
+  assert.equal(formatUserLabel("Arian", "Arian"), "@Arian");
+  assert.equal(formatUserLabel("Arian", null), "@Arian");
+  assert.deepEqual(optionalActorField(""), []);
+});
+
+test("command details include prefix and channel mention without empty options", () => {
+  const details = commandLogDetails(USER, "nwordleaderboard", "", "1014164674679427164", true);
+  assert.deepEqual(details, [
+    ["Who", `<@${USER}>`],
+    ["Command", "`.nwordleaderboard`"],
+    ["Channel", "<#1014164674679427164>"],
+  ]);
+});
+
+test("role lists are consistently sorted, markdown escaped, and capped", () => {
+  const names = ["DJ", "Members", "'", "Role_3", "Role_4", "Role_5", "Role_6", "Role_7", "Role_8", "Role_9", "Role_10", "Role_11"];
+  assert.equal(formatRoleList(names), "', DJ, Members, Role\\_10, Role\\_11, Role\\_3, Role\\_4, Role\\_5, Role\\_6, Role\\_7 +2 more");
+});
+
 test("clean member, channel and other-event fields keep IDs in the footer only", () => {
   const { output, footer } = formatFields([
     ["Member", `@Sabbir (monkey.d.luffy)\u2063{User:${USER}}\u2063`],
@@ -83,4 +104,11 @@ test("clean member, channel and other-event fields keep IDs in the footer only",
   assert.match(footer, /Channel ID 1014164674679427164/);
   assert.match(footer, /ID 1014164674679427165/);
   assert.doesNotMatch(footer, new RegExp(GUILD));
+});
+
+test("marked IDs do not get duplicated in the footer and channel mentions survive sanitizing", () => {
+  const ids = new Map();
+  const value = sanitizeLogText(`@Arian (keruptedd)\u2063{User:${USER}}\u2063 <#1014164674679427164>`, GUILD, ids);
+  assert.equal(value, "@Arian (keruptedd) <#1014164674679427164>");
+  assert.deepEqual([...ids.keys()], [`User ID ${USER}`]);
 });
