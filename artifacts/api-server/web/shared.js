@@ -7,7 +7,7 @@
     ["Features", "/#features", path === "/"],
     ["Commands", "/commands", path === "/commands"],
     ["Changelog", "/changelog", path === "/changelog"],
-    ["Status", "/status", path === "/status"],
+    ["Bot status", "/status", path === "/status"],
   ];
   const navTarget = document.querySelector("[data-shared-nav]");
   if (navTarget) {

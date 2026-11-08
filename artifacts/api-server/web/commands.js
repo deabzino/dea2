@@ -3,6 +3,17 @@
   if (!search) return;
   const grid = document.getElementById("command-grid");
   const pills = document.getElementById("category-pills");
+  const pillWrap = document.querySelector(".category-scroll-wrap");
+  const scroller = pills;
+  const updatePillOverflow = () => {
+    const remaining = scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft;
+    pillWrap.classList.toggle("can-scroll-left", scroller.scrollLeft > 1);
+    pillWrap.classList.toggle("can-scroll-right", remaining > 1);
+  };
+  const observePillOverflow = () => requestAnimationFrame(updatePillOverflow);
+  scroller.addEventListener("scroll", updatePillOverflow, { passive: true });
+  window.addEventListener("resize", observePillOverflow);
+  if ("ResizeObserver" in window) new ResizeObserver(observePillOverflow).observe(pillWrap);
   const error = document.getElementById("command-error");
   const empty = document.getElementById("command-empty");
   let commands = [];
@@ -11,6 +22,11 @@
   let query = "";
   const categories = ["All", "Among Us & voice", "Utility", "Server logging"];
   const slug = (value) => value.toLowerCase().replaceAll("&", "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const categoryIcon = (name) => ({
+    "Among Us & voice": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13v-2a8 8 0 0 1 16 0v2M4 13H3a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h3v-8H4Zm16 0h1a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-3v-8h2ZM8 20h4"/></svg>',
+    Utility: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="11" cy="18" r="2"/></svg>',
+    "Server logging": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h12M8 12h12M8 19h12"/><circle cx="4" cy="5" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="19" r="1"/></svg>',
+  }[name] || '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.6 1.7c-1.3 1.1-2.1 1.5-2.1 3.3M12 17.5h.01"/></svg>');
   const esc = (value) => String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   const highlighted = (value) => {
     const text = esc(value);
@@ -35,6 +51,7 @@
       const key = name === "All" ? "all" : slug(name);
       return `<button type="button" data-category="${key}" class="${category === key ? "active" : ""}" aria-pressed="${category === key}">${esc(name)}<span class="pill-count">${counts.get(name)}</span></button>`;
     }).join("");
+    observePillOverflow();
   };
   const filtered = () => commands.filter((command) => {
     if (category !== "all" && slug(command.category) !== category) return false;
@@ -54,7 +71,7 @@
       const typeNames = [slash ? "Slash" : "", prefix ? "Prefix" : ""].filter(Boolean).join(" + ");
       const content = [command.name, command.category, command.description, command.usage, command.example, aliases, permissions].join(" ");
       const copy = esc(command.example || command.usage);
-      return `<article class="command-card" aria-expanded="false" style="animation:chat-in .32s ${Math.min(index * 25, 180)}ms both"><button class="command-summary" type="button" aria-expanded="false"><span class="command-symbol">/</span><span class="command-summary-copy"><span class="command-name">${highlighted(`/${command.name}`)}</span><span class="command-desc">${highlighted(command.description)}</span><span class="command-cat">${esc(command.category)} · ${typeNames}</span></span><span class="expand-arrow" aria-hidden="true">⌄</span></button><div class="command-details"><div class="command-details-inner"><div class="command-extra">${detailLine("Usage", command.usage)}<div class="detail-line"><b>Example</b><div class="code-row"><code>${highlighted(command.example)}</code><button class="copy-button" type="button" data-copy="${copy}" aria-label="Copy example for ${esc(command.name)}">Copy</button></div></div>${detailLine("Aliases", aliases)}${detailLine("Required permissions", permissions)}${detailLine("Cooldown", command.cooldown)}</div></div></div></article>`;
+      return `<article class="command-card" aria-expanded="false" style="animation:chat-in .32s ${Math.min(index * 25, 180)}ms both"><button class="command-summary" type="button" aria-expanded="false"><span class="command-symbol">${categoryIcon(command.category)}</span><span class="command-summary-copy"><span class="command-name">${highlighted(`/${command.name}`)}</span><span class="command-desc">${highlighted(command.description)}</span><span class="command-cat">${esc(command.category)} · ${typeNames}</span></span><span class="expand-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></button><div class="command-details"><div class="command-details-inner"><div class="command-extra">${detailLine("Usage", command.usage)}<div class="detail-line"><b>Example</b><div class="code-row"><code>${highlighted(command.example)}</code><button class="copy-button" type="button" data-copy="${copy}" aria-label="Copy example for ${esc(command.name)}">Copy</button></div></div>${detailLine("Aliases", aliases)}${detailLine("Required permissions", permissions)}${detailLine("Cooldown", command.cooldown)}</div></div></div></article>`;
     }).join("");
     empty.hidden = items.length > 0;
   };
@@ -84,7 +101,6 @@
     summary.setAttribute("aria-expanded", String(open)); card.setAttribute("aria-expanded", String(open));
   });
   document.getElementById("clear-filters").addEventListener("click", () => { query = ""; search.value = ""; category = "all"; mode = "all"; document.querySelectorAll("[data-mode]").forEach((item, i) => { item.classList.toggle("active", i === 0); item.setAttribute("aria-pressed", String(i === 0)); }); updateUrl(); renderPills(); render(); });
-  const scroller = document.querySelector(".category-pills");
   document.querySelector(".pill-left").addEventListener("click", () => scroller.scrollBy({ left: -180, behavior: "smooth" }));
   document.querySelector(".pill-right").addEventListener("click", () => scroller.scrollBy({ left: 180, behavior: "smooth" }));
   fetch("/api/commands", { cache: "no-store" }).then((response) => { if (!response.ok) throw new Error(); return response.json(); }).then((data) => {

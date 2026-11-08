@@ -1,5 +1,14 @@
 (() => {
   const $ = (id) => document.getElementById(id);
+  const heroCommandCount = $("hero-command-count");
+  if (heroCommandCount) fetch("/api/commands", { cache: "no-store" }).then((response) => {
+    if (!response.ok) throw new Error();
+    return response.json();
+  }).then((data) => {
+    if (!Array.isArray(data)) throw new Error();
+    const count = data.filter((command) => command.hiddenFromWebsite !== true).length;
+    heroCommandCount.textContent = `${count} commands · slash and prefix`;
+  }).catch(() => { heroCommandCount.textContent = "Commands · slash and prefix"; });
   const messagesRoot = document.getElementById("chat-messages");
   if (!messagesRoot) return;
   const demos = {
