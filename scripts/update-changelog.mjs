@@ -40,6 +40,9 @@ for (const file of changedFiles) {
   else if (file.startsWith("artifacts/api-server/src/")) addArea("service");
 }
 
+const otherProjectFiles = changedFiles.filter((file) => file !== changelogPath && file !== statePath &&
+  !file.startsWith(".github/") && !file.startsWith("scripts/"));
+if (!areas.size && otherProjectFiles.length) addArea("service");
 if (!areas.size) process.exit(0);
 
 const latest = commits.at(-1);
