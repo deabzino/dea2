@@ -34,9 +34,28 @@ export function commandLogDetails(userId: string, command: string, options: stri
   ];
 }
 
-export function deletedByLabel(matchingActor: string, authorIsBot: boolean): string {
-  if (matchingActor) return matchingActor;
-  return authorIsBot
-    ? "Probably removed by a bot or the author"
-    : "Probably the author (Discord doesn't record when someone deletes their own message)";
+export type MessageDeleteAuditStatus = "available" | "permission_missing" | "unavailable";
+
+export function userMentionMarker(id: string | null | undefined): string {
+  return id && /^[0-9]{17,20}$/.test(id) ? `\u2063{MentionUser:${id}}\u2063` : "";
+}
+
+export function deletedByLabel(
+  authorId: string | null | undefined,
+  authorUsername: string | null | undefined,
+  actorId: string | null | undefined,
+  actorUsername: string | null | undefined,
+  auditStatus: MessageDeleteAuditStatus,
+): string {
+  const author = userMentionMarker(authorId);
+  const authorDetails = author ? `${author} (${authorUsername || "username unavailable"})` : "author not identified";
+  const actor = userMentionMarker(actorId);
+  if (actor) return `${actor} (${actorUsername || "username unavailable"})`;
+  if (auditStatus !== "available") {
+    const reason = auditStatus === "permission_missing" ? "View Audit Log permission missing" : "audit log unavailable";
+    return `Actor not identified (${reason}); author: ${authorDetails}`;
+  }
+  return author
+    ? `${author} (${authorUsername || "username unavailable"}; probably deleted their own message)`
+    : "Actor not identified (author unavailable; probably a self-delete)";
 }

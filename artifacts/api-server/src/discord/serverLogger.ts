@@ -195,7 +195,15 @@ async function auditActor(guild: Guild, type: AuditLogEvent, targetId?: string, 
   return "";
 }
 
-async function messageDeleteActor(guild: Guild, authorId: string, channelId: string): Promise<string> {
+type MessageDeleteActor =
+  | { id: string; username: string | null }
+  | { auditStatus: "available" | "permission_missing" | "unavailable" };
+
+async function messageDeleteActor(guild: Guild, authorId: string, channelId: string): Promise<MessageDeleteActor> {
+  const me = guild.members.me;
+  if (me && !me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+    return { auditStatus: "permission_missing" };
+  }
   try {
     const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 10 });
     const entry = logs.entries.find((item) => {
@@ -204,7 +212,7 @@ async function messageDeleteActor(guild: Guild, authorId: string, channelId: str
         (item.target as { id?: string } | null)?.id === authorId &&
         (!extra?.channel?.id || extra.channel.id === channelId);
     });
-    if (entry?.executor) return userText(entry.executor.id, entry.executor.tag);
+    if (entry?.executor) return { id: entry.executor.id, username: entry.executor.username };
 
     // Purges are recorded as one bulk-delete audit entry, while Discord may
     // still deliver individual MessageDelete gateway events for each message.
@@ -213,20 +221,29 @@ async function messageDeleteActor(guild: Guild, authorId: string, channelId: str
       const extra = item.extra as { channel?: { id?: string } } | null;
       return Date.now() - item.createdTimestamp < 15_000 && extra?.channel?.id === channelId;
     });
-    if (bulkEntry?.executor) return userText(bulkEntry.executor.id, bulkEntry.executor.tag);
-  } catch {
+    if (bulkEntry?.executor) return { id: bulkEntry.executor.id, username: bulkEntry.executor.username };
+  } catch (error) {
     // The bot may not have View Audit Log permission, or Discord may not have
     // made the entry available yet.
+    return { auditStatus: (error as { code?: number }).code === 50013 ? "permission_missing" : "unavailable" };
   }
-  return "";
+  return { auditStatus: "available" };
 }
 
 function embed(guild: Guild, title: string, color: number, details: Array<[string, string]>, target?: string, imageUrl?: string | null, avatarUrl?: string | null): EmbedBuilder {
   const ids = new Map<string, string>();
-  const clean = (value: string) => sanitizeLogText(value
+  const preservedMentions: string[] = [];
+  const clean = (value: string) => {
+    const prepared = value.replace(/\u2063\{MentionUser:([0-9]{17,20})\}\u2063/g, (_all, id: string) => {
+      const index = preservedMentions.push(`<@${id}>`) - 1;
+      return `\u2063{PreservedMention:${index}}\u2063`;
+    });
+    return sanitizeLogText(prepared
     .replace(/<@!?([0-9]{17,20})>/g, (_all, id: string) => `${userText(id, globalClient?.users.cache.get(id)?.username)}`)
     .replace(/<#([0-9]{17,20})>/g, (_all, id: string) => `<#${id}>`)
-    .replace(/<@&([0-9]{17,20})>/g, (_all, id: string) => `${guild.roles.cache.get(id)?.name ?? "role"}${idMarker("Role", id)}`), guild.id, ids);
+    .replace(/<@&([0-9]{17,20})>/g, (_all, id: string) => `${guild.roles.cache.get(id)?.name ?? "role"}${idMarker("Role", id)}`), guild.id, ids)
+      .replace(/\u2063\{PreservedMention:([0-9]+)\}\u2063/g, (_all, index: string) => preservedMentions[Number(index)] ?? "");
+  };
   if (target) ids.set(`Target ID ${target}`, "");
   const fields = details.filter(([, value]) => value.trim().length > 0).map(([name, value]) => ({ name: truncate(clean(name), 256), value: truncate(clean(value) || "No additional details", 1024), inline: true }));
   const footerIds = [...ids.keys()].join(" • ");
@@ -273,7 +290,7 @@ async function drain(): Promise<void> {
         const channel = (await globalClient?.channels.fetch(channelId).catch(() => null)) as TextBasedChannel | null;
         if (!channel || !("send" in channel)) continue;
         try {
-          await channel.send({ embeds: items.map((item) => item.embed), files: items.filter((item) => item.file).map((item) => item.file!) });
+          await channel.send({ embeds: items.map((item) => item.embed), files: items.filter((item) => item.file).map((item) => item.file!), allowedMentions: { parse: [] } });
         } catch (error) {
           console.error("Failed to send server log", error);
         }
@@ -441,7 +458,13 @@ export function registerServerLogger(client: Client): void {
       const logChannelId = (await getSettings(guild.id)).channelId ?? process.env.LOG_CHANNEL_ID ?? DEFAULT_CHANNEL_ID;
       if (snapshot.channelId === logChannelId) { snapshots.delete(message.id); return; }
       const actor = await messageDeleteActor(guild, snapshot.authorId, snapshot.channelId);
-      const deletedBy = deletedByLabel(actor, snapshot.authorBot);
+      const deletedBy = deletedByLabel(
+        snapshot.authorId,
+        snapshot.authorTag,
+        "id" in actor ? actor.id : null,
+        "id" in actor ? actor.username : null,
+        "id" in actor ? "available" : actor.auditStatus,
+      );
       const authorAvatar = guild.members.cache.get(snapshot.authorId)?.displayAvatarURL({ extension: "png", size: 128 });
       enqueue(guild, "messages", embed(guild, "Message deleted", COLORS.delete, [
         ["Who", userText(snapshot.authorId, snapshot.authorTag)], ["Actor", deletedBy],

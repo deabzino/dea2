@@ -65,9 +65,19 @@ test("voice bursts for one member are combined in order and flush at shutdown", 
 });
 
 test("message deletion wording handles audit matches, users and bots", () => {
-  assert.equal(deletedByLabel("@mod (moderator)", false), "@mod (moderator)");
-  assert.equal(deletedByLabel("", false), "Probably the author (Discord doesn't record when someone deletes their own message)");
-  assert.equal(deletedByLabel("", true), "Probably removed by a bot or the author");
+  assert.equal(
+    deletedByLabel(USER, "keruptedd", null, null, "available"),
+    `\u2063{MentionUser:${USER}}\u2063 (keruptedd; probably deleted their own message)`,
+  );
+  assert.equal(
+    deletedByLabel(USER, "keruptedd", "123456789012345678", "moderator", "available"),
+    "\u2063{MentionUser:123456789012345678}\u2063 (moderator)",
+  );
+  assert.equal(
+    deletedByLabel(USER, "keruptedd", null, null, "permission_missing"),
+    `Actor not identified (View Audit Log permission missing); author: \u2063{MentionUser:${USER}}\u2063 (keruptedd)`,
+  );
+  assert.equal(deletedByLabel(null, null, null, null, "unavailable"), "Actor not identified (audit log unavailable); author: author not identified");
 });
 
 test("log formatting omits empty brackets and actor placeholders", () => {
