@@ -22,7 +22,7 @@ export function formatRoleList(names: readonly string[], limit = 10): string {
 }
 
 export function optionalActorField(actor: string): [string, string][] {
-  return actor ? [["Who", actor]] : [];
+  return actor ? [["Actor", actor]] : [];
 }
 
 export function commandLogDetails(userId: string, command: string, options: string, channelId: string, prefix: boolean): [string, string][] {

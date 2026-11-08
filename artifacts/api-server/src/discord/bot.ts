@@ -1459,14 +1459,14 @@ export function startDiscordBot(): Client | null {
     } catch (error) {
       logger.error({ err: error }, "Error handling interaction");
       if (interaction.isChatInputCommand() && interaction.guild) {
-        logCommandError(interaction.guild, interaction.user.id, interaction.commandName, error);
+        logCommandError(interaction.guild, interaction.user.id, interaction.commandName, error, interaction.channelId);
       }
     }
   });
   client.on(Events.MessageCreate, (message) => {
     void handlePrefixCommand(message).catch((error) => {
       logger.error({ err: error }, "Error handling prefix command");
-      if (message.guild) logCommandError(message.guild, message.author.id, getPrefixCommand(message.content) ?? "unknown", error);
+      if (message.guild) logCommandError(message.guild, message.author.id, getPrefixCommand(message.content) ?? "unknown", error, message.channelId);
     });
   });
   client.on(Events.VoiceStateUpdate, (oldState, newState) => {

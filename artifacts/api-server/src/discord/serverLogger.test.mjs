@@ -75,6 +75,7 @@ test("log formatting omits empty brackets and actor placeholders", () => {
   assert.equal(formatUserLabel("Arian", "Arian"), "@Arian");
   assert.equal(formatUserLabel("Arian", null), "@Arian");
   assert.deepEqual(optionalActorField(""), []);
+  assert.deepEqual(optionalActorField("@Moderator"), [["Actor", "@Moderator"]]);
 });
 
 test("command details include prefix and channel mention without empty options", () => {
