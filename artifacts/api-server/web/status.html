@@ -1,1 +1,162 @@
-<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#090d13" media="(prefers-color-scheme: dark)"><meta name="theme-color" content="#f4f5f1" media="(prefers-color-scheme: light)"><meta name="description" content="Live health and uptime dashboard for dea, the Among Us Discord bot."><meta name="robots" content="noindex"><link rel="canonical" href="__SITE_URL__/status"><meta property="og:title" content="System status — dea"><meta property="og:description" content="Live health and uptime for the dea Discord bot."><meta property="og:type" content="website"><meta property="og:url" content="__SITE_URL__/status"><meta property="og:image" content="__SITE_URL__/og-image.png"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="System status — dea"><meta name="twitter:description" content="Live health and uptime for the dea Discord bot."><meta name="twitter:image" content="__SITE_URL__/og-image.png"><title>System status — dea</title><link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=1" sizes="any"><link rel="icon" href="/favicon-16x16.png?v=1" sizes="16x16" type="image/png"><link rel="icon" href="/favicon-32x32.png?v=1" sizes="32x32" type="image/png"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1"><link rel="icon" href="/icon-192.png?v=1" sizes="192x192" type="image/png"><link rel="icon" href="/icon-512.png?v=1" sizes="512x512" type="image/png"><link rel="icon" href="/icon-512-maskable.png?v=1" sizes="512x512" type="image/png"><link rel="manifest" href="/site.webmanifest?v=1"><link rel="stylesheet" href="/site.css?v=1"><script>(function(){try{var t=localStorage.getItem('dea-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;else document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}catch(e){}})()</script></head><body><a class="skip-link" href="#main">Skip to content</a><div data-shared-nav></div><main id="main" class="shell page-main status-main"><div class="status-banner is-waking" id="status-banner" role="status"><span class="banner-indicator"></span><span id="banner-text">Waking up the service, this can take a minute</span></div><header class="page-heading status-heading"><span class="eyebrow">SERVICE MONITOR</span><h1>All systems,<br><span>in their element.</span></h1><p>A live look at dea’s API and Discord connection. Status refreshes automatically while you’re here.</p></header><section class="status-grid" aria-label="Live service information"><article class="status-card primary-status"><div class="card-head"><span class="label">This session has been up</span><span class="status-tag"><i class="pulse-dot"></i>LIVE</span></div><div class="uptime-value" id="uptime-value">--:--:--</div><div class="subtext">Process uptime · counting in real time</div></article><article class="status-card bot-status-card"><span class="label">Discord bot</span><div class="large-value" id="bot-state">Checking</div><div class="subtext" id="bot-detail">Connecting to Discord gateway</div></article><article class="status-card info-status"><div class="info-row"><span>API service</span><b class="value" id="api-state"><i class="service-dot"></i>Checking</b></div><div class="info-row"><span>Discord servers</span><b class="value" id="server-count">—</b></div><div class="info-row"><span>Gateway latency</span><b class="value" id="gateway-ping">Measuring…</b></div></article><article class="status-card info-status"><div class="info-row"><span>Runtime</span><b class="value mono">Node.js</b></div><div class="info-row"><span>Server time</span><b class="value mono" id="server-time">—</b></div><div class="info-row"><span>Last checked</span><b class="value" id="last-checked">—</b></div></article></section><div class="status-footnote"><span>Last restart <b id="last-restart">—</b></span><span>Auto-refreshes every 15 seconds</span></div></main><div data-shared-footer></div><script src="/shared.js?v=1" defer></script><script src="/status.js?v=1" defer></script></body></html>
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta
+      name="theme-color"
+      content="#090d13"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
+      name="theme-color"
+      content="#f4f5f1"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="description"
+      content="Live health and uptime dashboard for dea, the Among Us Discord bot."
+    />
+    <meta name="robots" content="noindex" />
+    <link rel="canonical" href="__SITE_URL__/status" />
+    <meta property="og:title" content="System status — dea" />
+    <meta
+      property="og:description"
+      content="Live health and uptime for the dea Discord bot."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="__SITE_URL__/status" />
+    <meta property="og:image" content="__SITE_URL__/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="System status — dea" />
+    <meta
+      name="twitter:description"
+      content="Live health and uptime for the dea Discord bot."
+    />
+    <meta name="twitter:image" content="__SITE_URL__/og-image.png" />
+    <title>System status — dea</title>
+    <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico?v=2" sizes="any" />
+    <link
+      rel="icon"
+      href="/favicon-16x16.png?v=2"
+      sizes="16x16"
+      type="image/png"
+    />
+    <link
+      rel="icon"
+      href="/favicon-32x32.png?v=2"
+      sizes="32x32"
+      type="image/png"
+    />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+    <link
+      rel="icon"
+      href="/icon-192.png?v=2"
+      sizes="192x192"
+      type="image/png"
+    />
+    <link
+      rel="icon"
+      href="/icon-512.png?v=2"
+      sizes="512x512"
+      type="image/png"
+    />
+    <link
+      rel="icon"
+      href="/icon-512-maskable.png?v=2"
+      sizes="512x512"
+      type="image/png"
+    />
+    <link rel="manifest" href="/site.webmanifest?v=2" />
+    <link rel="stylesheet" href="/site.css?v=2" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("dea-theme");
+          if (t === "light" || t === "dark")
+            document.documentElement.dataset.theme = t;
+          else
+            document.documentElement.dataset.theme = matchMedia(
+              "(prefers-color-scheme: light)",
+            ).matches
+              ? "light"
+              : "dark";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div data-shared-nav></div>
+    <main id="main" class="shell page-main status-main">
+      <div class="status-banner is-waking" id="status-banner" role="status">
+        <span class="banner-indicator"></span
+        ><span id="banner-text"
+          >Waking up the service, this can take a minute</span
+        >
+      </div>
+      <header class="page-heading status-heading">
+        <span class="eyebrow">SERVICE MONITOR</span>
+        <h1>All systems,<br /><span>in their element.</span></h1>
+        <p>
+          A live look at dea’s API and Discord connection. Status refreshes
+          automatically while you’re here.
+        </p>
+      </header>
+      <section class="status-grid" aria-label="Live service information">
+        <article class="status-card primary-status">
+          <div class="card-head">
+            <span class="label">This session has been up</span
+            ><span class="status-tag"><i class="pulse-dot"></i>LIVE</span>
+          </div>
+          <div class="uptime-value" id="uptime-value">--:--:--</div>
+          <div class="subtext">Process uptime · counting in real time</div>
+        </article>
+        <article class="status-card bot-status-card">
+          <span class="label">Discord bot</span>
+          <div class="large-value" id="bot-state">Checking</div>
+          <div class="subtext" id="bot-detail">
+            Connecting to Discord gateway
+          </div>
+        </article>
+        <article class="status-card info-status">
+          <div class="info-row">
+            <span>API service</span
+            ><b class="value" id="api-state"
+              ><i class="service-dot"></i>Checking</b
+            >
+          </div>
+          <div class="info-row">
+            <span>Discord servers</span><b class="value" id="server-count">—</b>
+          </div>
+          <div class="info-row">
+            <span>Gateway latency</span
+            ><b class="value" id="gateway-ping">Measuring…</b>
+          </div>
+        </article>
+        <article class="status-card info-status">
+          <div class="info-row">
+            <span>Runtime</span><b class="value mono">Node.js</b>
+          </div>
+          <div class="info-row">
+            <span>Server time</span><b class="value mono" id="server-time">—</b>
+          </div>
+          <div class="info-row">
+            <span>Last checked</span><b class="value" id="last-checked">—</b>
+          </div>
+        </article>
+      </section>
+      <div class="status-footnote">
+        <span>Last restart <b id="last-restart">—</b></span
+        ><span>Auto-refreshes every 15 seconds</span>
+      </div>
+    </main>
+    <div data-shared-footer></div>
+    <script src="/shared.js?v=1" defer></script>
+    <script src="/status.js?v=1" defer></script>
+  </body>
+</html>

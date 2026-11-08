@@ -52,7 +52,7 @@ test("production preview serves direct pages and safe public data", async () => 
     assert.equal(response.headers.get("x-robots-tag"), "noindex", `${route} should be excluded from indexing`);
     const body = await response.text();
     assert.match(body, /name="robots" content="noindex"/);
-    assert.match(body, /site\.css\?v=1/);
+    assert.match(body, /site\.css\?v=2/);
     assert.match(body, /og:image/);
     assert.match(body, /twitter:card.*summary_large_image/);
     assert.doesNotMatch(body, /__SITE_URL__/);
@@ -78,7 +78,7 @@ test("production preview serves direct pages and safe public data", async () => 
   assert.ok(commands.every((command) => command.hiddenFromWebsite !== true));
   sourceBodies += commandsText + JSON.stringify(status);
 
-  for (const asset of ["/changelog.json", "/shared.js?v=1", "/home.js?v=1", "/commands.js?v=1", "/changelog.js?v=1", "/status.js?v=1", "/site.css?v=1", "/site.webmanifest?v=1", "/robots.txt", "/favicon.svg?v=1"]) {
+  for (const asset of ["/changelog.json", "/shared.js?v=1", "/home.js?v=2", "/commands.js?v=1", "/changelog.js?v=1", "/status.js?v=1", "/site.css?v=2", "/site.webmanifest?v=2", "/robots.txt", "/favicon.svg?v=2"]) {
     const response = await fetch(`${base}${asset}`);
     assert.equal(response.status, 200, `${asset} should be included in the deployed output`);
     assert.equal(response.headers.get("x-robots-tag"), "noindex", `${asset} should carry the noindex header`);

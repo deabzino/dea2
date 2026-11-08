@@ -19,21 +19,13 @@ function image(width, height, color = "#090d13") {
   return { width,height,pixels,rect,circle,line };
 }
 
-function drawLogo(size, fullBackground = false) {
-  const im = image(size,size,"#101b23"); const s=size/64;
-  if (!fullBackground) {
-    const base=im.pixels.slice();
-    for(let y=0;y<size;y++) for(let x=0;x<size;x++) {
-      const cornerX=Math.min(x,size-1-x), cornerY=Math.min(y,size-1-y);
-      if(cornerX<Math.ceil(size*.18)&&cornerY<Math.ceil(size*.18)&&Math.hypot(Math.ceil(size*.18)-cornerX,Math.ceil(size*.18)-cornerY)>Math.ceil(size*.18)) im.pixels.fill(0,(y*size+x)*4,(y*size+x)*4+4);
-    }
-    void base;
-  }
-  im.circle(25*s,40*s,14*s,"#80f0c0");
-  im.circle(25*s,40*s,7*s,"#101b23");
-  im.rect(37*s,12*s,9*s,40*s,"#80f0c0");
-  im.circle(53*s,15*s,2*s,"#d8fff0");
-  im.rect(52*s,11*s,2*s,8*s,"#d8fff0");
+function drawLogo(size, lightBackground = false) {
+  const im = image(size, size, lightBackground ? "#f4f5f1" : "#000000");
+  if (!lightBackground) im.pixels.fill(0);
+  const points = [[3,23],[17,26],[25,13],[29,23],[32,19],[35,23],[39,13],[47,26],[61,23],[57,42],[48,34],[47,51],[37,43],[32,53],[27,43],[17,51],[16,34],[7,42]];
+  const inside = (x, y) => { let hit = false; for (let i = 0, j = points.length - 1; i < points.length; j = i++) { const [xi, yi] = points[i], [xj, yj] = points[j]; if (((yi > y) !== (yj > y)) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
+  const ink = [0, 0, 0, 255];
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (inside((x + .5) * 64 / size, (y + .5) * 64 / size)) im.pixels.set(ink, (y * size + x) * 4);
   return im;
 }
 
@@ -49,9 +41,9 @@ function drawText(im,text,x,y,scale,color){for(const char of text.toUpperCase())
 function drawOG(){const im=image(1200,630);for(let i=0;i<70;i++){const x=(i*197+31)%1200,y=(i*113+41)%630;im.circle(x,y,(i%3===0?2:1),i%4===0?"#80f0c0":"#354752");}im.circle(945,310,236,[20,43,49,255],220);im.circle(945,310,178,[21,47,48,255],170);im.circle(945,310,95,"#101b23");im.circle(930,370,55,"#80f0c0");im.circle(930,370,28,"#101b23");im.rect(970,250,36,180,"#80f0c0");im.circle(1048,244,7,"#d8fff0");drawText(im,"dea",118,245,20,"#80f0c0");drawText(im,"AMONG US ROUNDS ON DISCORD",120,410,5,"#edf5f7");drawText(im,"VOICE TOOLS  /  LOBBY CODES  /  ROUND FLOW",120,480,3,"#99aab5");im.line(120,540,1080,540,1,"#31414b");return im;}
 
 await fs.mkdir(out,{recursive:true});
-for(const size of [16,32,48,180,192,512]) await fs.writeFile(path.join(out,size===180?"apple-touch-icon.png":size===192?"icon-192.png":size===512?"icon-512.png":`favicon-${size}x${size}.png`),encodePNG(drawLogo(size,size===180||size===192||size===512)));
+for(const size of [16,32,48,180,192,512]) await fs.writeFile(path.join(out,size===180?"apple-touch-icon.png":size===192?"icon-192.png":size===512?"icon-512.png":`favicon-${size}x${size}.png`),encodePNG(drawLogo(size,size===180)));
 await fs.writeFile(path.join(out,"icon-512-maskable.png"),encodePNG(drawLogo(512,true)));
-await fs.writeFile(path.join(out,"og-image.png"),encodePNG(drawOG()));
+await fs.writeFile(path.join(out,"favicon.svg"),'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><style>path{fill:#000}@media(prefers-color-scheme:dark){path{fill:#fff}}</style><path d="M3 23 17 26 25 13 29 23 32 19 35 23 39 13 47 26 61 23 57 42 48 34 47 51 37 43 32 53 27 43 17 51 16 34 7 42Z"/></svg>');
 const icoSizes=[16,32,48], entries=icoSizes.map((size)=>encodePNG(drawLogo(size)));
 const header=Buffer.alloc(6+16*entries.length);header.writeUInt16LE(0,0);header.writeUInt16LE(1,2);header.writeUInt16LE(entries.length,4);let offset=header.length;
 entries.forEach((png,index)=>{const at=6+index*16;header[at]=icoSizes[index];header[at+1]=icoSizes[index];header[at+2]=0;header[at+3]=0;header.writeUInt16LE(1,at+4);header.writeUInt16LE(32,at+6);header.writeUInt32LE(png.length,at+8);header.writeUInt32LE(offset,at+12);offset+=png.length;});

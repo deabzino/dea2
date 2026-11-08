@@ -1,5 +1,32 @@
 (() => {
   const $ = (id) => document.getElementById(id);
+  const voiceCard = document.querySelector(".voice-card");
+  const voicePlayers = document.querySelector(".voice-players");
+  const voiceState = document.querySelector("[data-voice-state]");
+  const voiceStatus = document.querySelector("[data-voice-status]");
+  let voiceTimer = null;
+  let meeting = false;
+  const setVoiceState = () => {
+    meeting = !meeting;
+    voiceCard.dataset.voiceState = meeting ? "meeting" : "playing";
+    voicePlayers.dataset.voiceMode = meeting ? "meeting" : "playing";
+    voiceState.textContent = meeting ? "Meeting" : "Playing";
+    voiceStatus.textContent = meeting ? "Server muted everyone" : "Dead player server-muted";
+    voicePlayers.querySelectorAll(".voice-player").forEach((row, index) => {
+      const muted = meeting || index === 2;
+      const icon = row.querySelector(".mic-icon");
+      icon.setAttribute("aria-label", muted ? "Microphone muted" : "Microphone on");
+      icon.innerHTML = muted
+        ? '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8m-1-14 7 7m0-7-7 7"/>'
+        : '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8"/>';
+    });
+  };
+  const startVoiceLoop = () => {
+    clearInterval(voiceTimer);
+    if (voiceCard && !document.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) voiceTimer = setInterval(setVoiceState, 4200);
+  };
+  document.addEventListener("visibilitychange", startVoiceLoop);
+  if (voiceCard) { voiceCard.dataset.voiceState = "playing"; startVoiceLoop(); }
   const heroCommandCount = $("hero-command-count");
   if (heroCommandCount) fetch("/api/commands", { cache: "no-store" }).then((response) => {
     if (!response.ok) throw new Error();
@@ -13,12 +40,12 @@
   if (!messagesRoot) return;
   const demos = {
     round: [
-      ["user", ".dead @Jess"],
-      ["bot", "Marked @Jess as dead and server-muted them."],
+      ["user", ".dead @Turhan"],
+      ["bot", "Marked @Turhan as dead and server-muted them."],
       ["user", ".mute"],
       ["bot", "Server muted everyone in Voice 1 (2 members changed)."],
       ["user", ".list"],
-      ["embed", "Dead Players", "Players currently marked dead are shown below. · Jess · Voice channel: Voice 1 · Mute state: Server muted"],
+      ["embed", "Dead Players", "Players currently marked dead are shown below. · Turhan · Voice channel: Voice 1 · Mute state: Server muted"],
       ["user", ".unmute"],
       ["bot", "Unserver muted everyone in Voice 1 (1 member changed)."],
     ],

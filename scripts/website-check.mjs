@@ -58,11 +58,22 @@ try {
   const themePage = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
   themePage.on("pageerror", (error) => consoleErrors.push(`theme: ${error.message}`));
   listenConsole(themePage, "theme");
+  const avatarFixture = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#5865f2"/><path d="M5 12 11 14 14 8 16 12 18 8 21 14 27 12 25 21 20 18 16 24 12 18 7 21Z" fill="white"/></svg>')}`;
+  await themePage.route("**/api/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ avatarUrl: avatarFixture, botOnline: true, currentTime: new Date().toISOString(), serverCount: 0, discordPingMs: 1 }) }));
   await themePage.goto(`${base}/`);
   assert.equal(await themePage.locator("html").getAttribute("data-theme"), "dark");
   await themePage.waitForFunction(() => document.querySelector("#hero-command-count")?.textContent.match(/^\d+ commands · slash and prefix$/));
   assert.equal(await themePage.locator("#hero-command-count").textContent(), "12 commands · slash and prefix");
   assert.equal(await themePage.locator(".mini-avatars").count(), 0);
+  assert.equal(await themePage.locator(".voice-card").count(), 1, "hero voice channel card should render");
+  await themePage.waitForFunction(() => { const img = document.querySelector(".voice-bot-avatar img"); return img?.complete && img.naturalWidth > 0; });
+  assert.equal(await themePage.locator(".voice-bot-avatar img").getAttribute("src"), avatarFixture, "hero card should use the shared bot pfp URL");
+  const phonePage = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: "light" });
+  await phonePage.route("**/api/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ avatarUrl: avatarFixture, botOnline: true, currentTime: new Date().toISOString(), serverCount: 0, discordPingMs: 1 }) }));
+  await phonePage.goto(`${base}/`, { waitUntil: "networkidle" });
+  assert.equal(await phonePage.locator(".voice-bot-avatar img").evaluate((img) => img.complete && img.naturalWidth > 0), true, "hero pfp should load at phone width");
+  assert.equal(await phonePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "home page should have no horizontal scroll at 390px");
+  await phonePage.close();
   assert.equal(await themePage.locator(".window-users").textContent(), "#", "the chat header should not show fake user avatars");
   const featureMetrics = await themePage.locator(".feature-card").evaluateAll((cards) => {
     const boxes = cards.map((card) => ({ card: card.getBoundingClientRect(), chip: card.querySelector(".feature-link").getBoundingClientRect() }));

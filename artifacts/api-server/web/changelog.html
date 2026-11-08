@@ -1,1 +1,135 @@
-<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#090d13" media="(prefers-color-scheme: dark)"><meta name="theme-color" content="#f4f5f1" media="(prefers-color-scheme: light)"><meta name="description" content="A friendly changelog of improvements to dea."><meta name="robots" content="noindex"><link rel="canonical" href="__SITE_URL__/changelog"><meta property="og:title" content="Changelog — dea"><meta property="og:description" content="See what has changed in dea."><meta property="og:type" content="website"><meta property="og:url" content="__SITE_URL__/changelog"><meta property="og:image" content="__SITE_URL__/og-image.png"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Changelog — dea"><meta name="twitter:description" content="See what has changed in dea."><meta name="twitter:image" content="__SITE_URL__/og-image.png"><title>Changelog — dea</title><link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=1" sizes="any"><link rel="icon" href="/favicon-16x16.png?v=1" sizes="16x16" type="image/png"><link rel="icon" href="/favicon-32x32.png?v=1" sizes="32x32" type="image/png"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1"><link rel="icon" href="/icon-192.png?v=1" sizes="192x192" type="image/png"><link rel="icon" href="/icon-512.png?v=1" sizes="512x512" type="image/png"><link rel="icon" href="/icon-512-maskable.png?v=1" sizes="512x512" type="image/png"><link rel="manifest" href="/site.webmanifest?v=1"><link rel="stylesheet" href="/site.css?v=1"><script>(function(){try{var t=localStorage.getItem('dea-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;else document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}catch(e){}})()</script></head><body><a class="skip-link" href="#main">Skip to content</a><div data-shared-nav></div><main id="main" class="shell page-main"><header class="page-heading"><span class="eyebrow">A LITTLE BETTER EACH ROUND</span><h1>What’s <span>new.</span></h1><p>Small improvements to help your crew get back to the game.</p></header><section class="changelog-tools"><div class="tag-filters" role="group" aria-label="Filter updates"><button class="active" data-change-filter="all" aria-pressed="true">All updates</button><button data-change-filter="Added" aria-pressed="false">Added</button><button data-change-filter="Improved" aria-pressed="false">Improved</button><button data-change-filter="Fixed" aria-pressed="false">Fixed</button><button data-change-filter="Removed" aria-pressed="false">Removed</button></div><label class="sr-only" for="change-search">Search updates</label><div class="search-wrap"><span aria-hidden="true">⌕</span><input id="change-search" type="search" placeholder="Search updates…" aria-label="Search updates"></div><div class="expand-controls"><button id="expand-all">Expand all</button><button id="collapse-all">Collapse all</button></div></section><section id="timeline" class="timeline" aria-live="polite"></section><div id="changelog-error" class="notice error" hidden>Updates could not load right now. Please refresh in a moment.</div><div id="changelog-empty" class="empty-state" hidden><h2>No updates match</h2><p>Try a different search or update type.</p></div></main><div data-shared-footer></div><script src="/shared.js?v=1" defer></script><script src="/changelog.js?v=1" defer></script></body></html>
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta
+      name="theme-color"
+      content="#090d13"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
+      name="theme-color"
+      content="#f4f5f1"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="description"
+      content="A friendly changelog of improvements to dea."
+    />
+    <meta name="robots" content="noindex" />
+    <link rel="canonical" href="__SITE_URL__/changelog" />
+    <meta property="og:title" content="Changelog — dea" />
+    <meta property="og:description" content="See what has changed in dea." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="__SITE_URL__/changelog" />
+    <meta property="og:image" content="__SITE_URL__/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Changelog — dea" />
+    <meta name="twitter:description" content="See what has changed in dea." />
+    <meta name="twitter:image" content="__SITE_URL__/og-image.png" />
+    <title>Changelog — dea</title>
+    <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico?v=2" sizes="any" />
+    <link
+      rel="icon"
+      href="/favicon-16x16.png?v=2"
+      sizes="16x16"
+      type="image/png"
+    />
+    <link
+      rel="icon"
+      href="/favicon-32x32.png?v=2"
+      sizes="32x32"
+      type="image/png"
+    />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+    <link
+      rel="icon"
+      href="/icon-192.png?v=2"
+      sizes="192x192"
+      type="image/png"
+    />
+    <link
+      rel="icon"
+      href="/icon-512.png?v=2"
+      sizes="512x512"
+      type="image/png"
+    />
+    <link
+      rel="icon"
+      href="/icon-512-maskable.png?v=2"
+      sizes="512x512"
+      type="image/png"
+    />
+    <link rel="manifest" href="/site.webmanifest?v=2" />
+    <link rel="stylesheet" href="/site.css?v=2" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("dea-theme");
+          if (t === "light" || t === "dark")
+            document.documentElement.dataset.theme = t;
+          else
+            document.documentElement.dataset.theme = matchMedia(
+              "(prefers-color-scheme: light)",
+            ).matches
+              ? "light"
+              : "dark";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div data-shared-nav></div>
+    <main id="main" class="shell page-main">
+      <header class="page-heading">
+        <span class="eyebrow">A LITTLE BETTER EACH ROUND</span>
+        <h1>What’s <span>new.</span></h1>
+        <p>Small improvements to help your crew get back to the game.</p>
+      </header>
+      <section class="changelog-tools">
+        <div class="tag-filters" role="group" aria-label="Filter updates">
+          <button class="active" data-change-filter="all" aria-pressed="true">
+            All updates</button
+          ><button data-change-filter="Added" aria-pressed="false">Added</button
+          ><button data-change-filter="Improved" aria-pressed="false">
+            Improved</button
+          ><button data-change-filter="Fixed" aria-pressed="false">Fixed</button
+          ><button data-change-filter="Removed" aria-pressed="false">
+            Removed
+          </button>
+        </div>
+        <label class="sr-only" for="change-search">Search updates</label>
+        <div class="search-wrap">
+          <span aria-hidden="true">⌕</span
+          ><input
+            id="change-search"
+            type="search"
+            placeholder="Search updates…"
+            aria-label="Search updates"
+          />
+        </div>
+        <div class="expand-controls">
+          <button id="expand-all">Expand all</button
+          ><button id="collapse-all">Collapse all</button>
+        </div>
+      </section>
+      <section id="timeline" class="timeline" aria-live="polite"></section>
+      <div id="changelog-error" class="notice error" hidden>
+        Updates could not load right now. Please refresh in a moment.
+      </div>
+      <div id="changelog-empty" class="empty-state" hidden>
+        <h2>No updates match</h2>
+        <p>Try a different search or update type.</p>
+      </div>
+    </main>
+    <div data-shared-footer></div>
+    <script src="/shared.js?v=1" defer></script>
+    <script src="/changelog.js?v=1" defer></script>
+  </body>
+</html>
